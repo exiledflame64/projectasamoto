@@ -1,0 +1,13 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.7",
+	"Category": "",
+	"Description": "A city-builder.",
+	"Modules": [
+		{
+			"Name": "Realm",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
