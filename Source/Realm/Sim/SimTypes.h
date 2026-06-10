@@ -28,7 +28,7 @@ UENUM(BlueprintType)
 enum class EBuildingType : uint8
 {
 	None,
-	WoodcutterHut,
+	Lumberyard,
 	Storage   // Phase 1 set; extend later
 };
 
@@ -47,7 +47,8 @@ struct FAgent
 	float       Speed         = 200.f;
 	EAgentState State         = EAgentState::Idle;
 	FBuildingId AssignedJob   = INVALID_ID;  // building emitting the claimed job
-	FTreeId     TargetTree     = INVALID_ID;  // tree being walked to / chopped
+	FTreeId     TargetTree    = INVALID_ID;  // tree being walked to / chopped
+	float       WorkTimer     = 0.f;         // chopping progress while Working
 	int32       CarriedAmount = 0;
 	EResource   CarriedType   = EResource::None;
 };
@@ -67,7 +68,7 @@ struct FBuilding
 struct FTree
 {
 	FVector Position  = FVector::ZeroVector;
-	int32   Remaining = 1;       // logs left to chop
+	int32   Remaining = 5;       // logs left to chop
 	bool    bClaimed  = false;   // an agent is walking to / chopping this
 };
 
@@ -82,13 +83,33 @@ struct FAgentSnapshot
 
 	UPROPERTY(BlueprintReadOnly, Category = "Sim")
 	EAgentState State = EAgentState::Idle;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Sim")
+	int32 CarriedAmount = 0;
+};
+
+// Read-only copies of buildings/trees so the render layer can mirror the world
+// without touching sim data directly (hard rule #2).
+struct FBuildingSnapshot
+{
+	FVector       Position  = FVector::ZeroVector;
+	EBuildingType Type      = EBuildingType::None;
+	int32         Inventory = 0;
+};
+
+struct FTreeSnapshot
+{
+	FVector Position  = FVector::ZeroVector;
+	int32   Remaining = 0;
 };
 
 // Render-side, read-only copy of sim state for one frame. Plain struct (copied
 // across the double buffer); the inner element is a USTRUCT for Blueprint/UI use.
 struct FSimSnapshot
 {
-	TArray<FAgentSnapshot> Agents;
+	TArray<FAgentSnapshot>    Agents;
+	TArray<FBuildingSnapshot> Buildings;
+	TArray<FTreeSnapshot>     Trees;
 	int32 StorageLogCount = 0;
 	int64 TickNumber      = 0;
 };

@@ -33,11 +33,16 @@ private:
 	TArray<FTree>     Trees;
 	int64 TickNumber = 0;
 
-	// --- The 6 tick phases (Phase 0: stubs; filled during Phase 1) ---
+	// --- The 6 tick phases ---
 	void Phase_Clock(float Dt);
 	void Phase_Needs(float Dt);        // no-op until Phase 2
 	void Phase_JobAssignment();
 	void Phase_Production(float Dt);
 	void Phase_Movement(float Dt);
 	// Phase 6 (snapshot) is built on demand via BuildSnapshot().
+
+	// --- Phase 1 helpers ---
+	bool        HasBuilding(EBuildingType Type) const;
+	FTreeId     FindNearestAvailableTree(const FVector& From) const;
+	FBuildingId FindNearestStorage(const FVector& From) const;
 };

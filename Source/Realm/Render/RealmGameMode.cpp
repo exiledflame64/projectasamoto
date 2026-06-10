@@ -2,22 +2,65 @@
 
 #include "RealmGameMode.h"
 #include "RTSCameraPawn.h"
+#include "RealmPlayerController.h"
+#include "SimVisualizer.h"
+#include "Core/SimSubsystem.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
-#include "GameFramework/PlayerController.h"
 
 ARealmGameMode::ARealmGameMode()
 {
 	DefaultPawnClass      = ARTSCameraPawn::StaticClass();
-	PlayerControllerClass = APlayerController::StaticClass();
+	PlayerControllerClass = ARealmPlayerController::StaticClass();
 }
 
 void ARealmGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 	SpawnGroundPlane();
+	SeedSimWorld();
+	SpawnVisualizer();
+}
+
+void ARealmGameMode::SeedSimWorld()
+{
+	UGameInstance* GI = GetGameInstance();
+	USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+	if (!Sub)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Realm] No SimSubsystem; cannot seed world."));
+		return;
+	}
+
+	FSimWorld& Sim = Sub->GetSim();
+
+	// Central storage the villager deposits logs into.
+	Sim.PlaceBuilding(EBuildingType::Storage, FVector::ZeroVector);
+
+	// A ring of trees to chop. Lumberyards + villagers arrive when the player builds.
+	for (int32 i = 0; i < NumTrees; ++i)
+	{
+		const float Angle = (2.f * PI * i) / FMath::Max(NumTrees, 1);
+		const FVector Pos(FMath::Cos(Angle) * TreeRingRadius,
+			FMath::Sin(Angle) * TreeRingRadius, 0.f);
+		Sim.SpawnTree(Pos);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Realm] Seeded sim: 1 storage + %d trees. Pick a blueprint, then click the ground."),
+		NumTrees);
+}
+
+void ARealmGameMode::SpawnVisualizer()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->SpawnActor<ASimVisualizer>(ASimVisualizer::StaticClass(),
+			FTransform::Identity);
+	}
 }
 
 void ARealmGameMode::SpawnGroundPlane()

@@ -5,6 +5,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/InputSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
 
@@ -59,11 +60,18 @@ void ARTSCameraPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	PlayerInputComponent->BindAction("Cam_RotateLeft",  IE_Released, this, &ARTSCameraPawn::OnRotateLeftReleased);
 	PlayerInputComponent->BindAction("Cam_RotateRight", IE_Pressed,  this, &ARTSCameraPawn::OnRotateRightPressed);
 	PlayerInputComponent->BindAction("Cam_RotateRight", IE_Released, this, &ARTSCameraPawn::OnRotateRightReleased);
-	PlayerInputComponent->BindAction("Cam_RotateDrag",  IE_Pressed,  this, &ARTSCameraPawn::OnDragRotatePressed);
-	PlayerInputComponent->BindAction("Cam_RotateDrag",  IE_Released, this, &ARTSCameraPawn::OnDragRotateReleased);
+	PlayerInputComponent->BindAction("Cam_PanDrag",     IE_Pressed,  this, &ARTSCameraPawn::OnDragPanPressed);
+	PlayerInputComponent->BindAction("Cam_PanDrag",     IE_Released, this, &ARTSCameraPawn::OnDragPanReleased);
 
 	PlayerInputComponent->BindAction("Debug_SaveGame", IE_Pressed, this, &ARTSCameraPawn::OnSaveGame);
 	PlayerInputComponent->BindAction("Debug_LoadGame", IE_Pressed, this, &ARTSCameraPawn::OnLoadGame);
+
+	// Diagnostic: confirms the renamed ini mapping actually loaded (a stale
+	// editor session or Saved-config override would report 0 here).
+	TArray<FInputActionKeyMapping> PanMappings;
+	UInputSettings::GetInputSettings()->GetActionMappingByName(TEXT("Cam_PanDrag"), PanMappings);
+	UE_LOG(LogTemp, Log, TEXT("[RealmCam] Input bound; Cam_PanDrag has %d key mapping(s)."),
+		PanMappings.Num());
 }
 
 void ARTSCameraPawn::Tick(float DeltaSeconds)
@@ -72,6 +80,7 @@ void ARTSCameraPawn::Tick(float DeltaSeconds)
 
 	ApplyPan(DeltaSeconds);
 	ApplyEdgeScroll(DeltaSeconds);
+	ApplyDragPan();
 	ApplyRotate(DeltaSeconds);
 	ApplyZoom(DeltaSeconds);
 
@@ -82,6 +91,27 @@ void ARTSCameraPawn::Tick(float DeltaSeconds)
 }
 
 // --- Input accumulation ---
+void ARTSCameraPawn::OnDragPanPressed()
+{
+	bDragPan = DeprojectCursorToGround(DragAnchor);
+
+	// Camera lag would make the anchor swim under the cursor; hold it 1:1
+	// (the editor viewport has no lag either).
+	SpringArm->bEnableCameraLag = !bDragPan;
+
+	UE_LOG(LogTemp, Log, TEXT("[RealmCam] Pan drag %s at %s."),
+		bDragPan ? TEXT("started") : TEXT("rejected (no ground under cursor)"),
+		*DragAnchor.ToString());
+}
+
+void ARTSCameraPawn::OnDragPanReleased()
+{
+	bDragPan = false;
+	SpringArm->bEnableCameraLag = true;
+	// Verbose: focus-loss key flushes re-fire IE_Released, which would spam at Log.
+	UE_LOG(LogTemp, Verbose, TEXT("[RealmCam] Pan drag released."));
+}
+
 void ARTSCameraPawn::OnMoveForward(float Value) { MoveForwardInput = Value; }
 void ARTSCameraPawn::OnMoveRight(float Value)   { MoveRightInput = Value; }
 void ARTSCameraPawn::OnZoom(float Value)        { PendingZoom = Value; }
@@ -107,8 +137,9 @@ void ARTSCameraPawn::ApplyPan(float DeltaSeconds)
 
 void ARTSCameraPawn::ApplyEdgeScroll(float DeltaSeconds)
 {
+	// Edge scroll yields entirely to an active middle-drag pan.
 	const APlayerController* PC = Cast<APlayerController>(GetController());
-	if (!PC || !PC->ShouldShowMouseCursor())
+	if (bDragPan || !PC || !PC->ShouldShowMouseCursor())
 	{
 		return;
 	}
@@ -147,6 +178,43 @@ void ARTSCameraPawn::ApplyEdgeScroll(float DeltaSeconds)
 	AddActorWorldOffset(FVector(Delta.X, Delta.Y, 0.f));
 }
 
+// Editor-viewport-style pan: keep the ground point grabbed at drag start under
+// the cursor. Built on cursor deprojection rather than mouse deltas, because in
+// NoCapture mouse mode (cursor visible for UI/placement) raw deltas are never
+// routed to player input.
+void ARTSCameraPawn::ApplyDragPan()
+{
+	if (!bDragPan)
+	{
+		return;
+	}
+
+	FVector Cur;
+	if (DeprojectCursorToGround(Cur))
+	{
+		// Move the rig so the anchor lands back under the cursor.
+		AddActorWorldOffset(FVector(DragAnchor.X - Cur.X, DragAnchor.Y - Cur.Y, 0.f));
+	}
+}
+
+bool ARTSCameraPawn::DeprojectCursorToGround(FVector& OutGroundPos) const
+{
+	const APlayerController* PC = Cast<APlayerController>(GetController());
+	FVector Origin, Dir;
+	if (!PC || !PC->DeprojectMousePositionToWorld(Origin, Dir))
+	{
+		return false;
+	}
+	if (Dir.Z > -KINDA_SMALL_NUMBER)   // ray parallel to / away from the ground
+	{
+		return false;
+	}
+
+	OutGroundPos = Origin - Dir * (Origin.Z / Dir.Z);
+	OutGroundPos.Z = 0.f;
+	return true;
+}
+
 void ARTSCameraPawn::ApplyRotate(float DeltaSeconds)
 {
 	float YawDelta = 0.f;
@@ -154,17 +222,6 @@ void ARTSCameraPawn::ApplyRotate(float DeltaSeconds)
 	// Q/E continuous rotation.
 	if (bRotateLeft)  YawDelta -= RotateSpeed * DeltaSeconds;
 	if (bRotateRight) YawDelta += RotateSpeed * DeltaSeconds;
-
-	// Middle-mouse drag rotation: scale raw mouse-X delta directly.
-	if (bDragRotate)
-	{
-		if (const APlayerController* PC = Cast<APlayerController>(GetController()))
-		{
-			float DX = 0.f, DY = 0.f;
-			PC->GetInputMouseDelta(DX, DY);
-			YawDelta += DX * DragRotateSpeed;
-		}
-	}
 
 	if (!FMath::IsNearlyZero(YawDelta))
 	{

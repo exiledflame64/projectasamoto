@@ -23,6 +23,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Realm")
 	float GroundHalfSize = 10000.f;
 
+	// Phase 1 starting world: trees on a ring around a central storage.
+	UPROPERTY(EditDefaultsOnly, Category = "Realm")
+	int32 NumTrees = 6;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Realm")
+	float TreeRingRadius = 1500.f;
+
 private:
 	void SpawnGroundPlane();
+	void SeedSimWorld();
+	void SpawnVisualizer();
 };

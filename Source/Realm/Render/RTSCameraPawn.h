@@ -1,7 +1,8 @@
 // Copyright Asamoto.
-// Phase 0 RTS camera: WASD/edge-scroll pan, scroll-wheel zoom, Q/E + middle-drag
-// rotate. Also hosts the F5/F9 save-load debug stub. Render/UI side only — it
-// reads the sim snapshot and never mutates sim state directly.
+// Phase 0 RTS camera: WASD/edge-scroll pan, middle-drag pan (editor-viewport
+// style: the grabbed ground point stays under the cursor), scroll-wheel zoom,
+// Q/E rotate. Also hosts the F5/F9 save-load debug stub. Render/UI side only —
+// it reads the sim snapshot and never mutates sim state directly.
 
 #pragma once
 
@@ -56,9 +57,6 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Camera|Rotate")
 	float RotateSpeed = 90.f;   // deg/sec for Q/E
 
-	UPROPERTY(EditAnywhere, Category = "Camera|Rotate")
-	float DragRotateSpeed = 0.2f;   // deg per mouse pixel
-
 private:
 	// Input handlers
 	void OnMoveForward(float Value);
@@ -68,15 +66,19 @@ private:
 	void OnRotateLeftReleased() { bRotateLeft = false; }
 	void OnRotateRightPressed()  { bRotateRight = true; }
 	void OnRotateRightReleased() { bRotateRight = false; }
-	void OnDragRotatePressed()  { bDragRotate = true; }
-	void OnDragRotateReleased() { bDragRotate = false; }
+	void OnDragPanPressed();
+	void OnDragPanReleased();
 	void OnSaveGame();
 	void OnLoadGame();
 
 	void ApplyPan(float DeltaSeconds);
 	void ApplyEdgeScroll(float DeltaSeconds);
+	void ApplyDragPan();
 	void ApplyRotate(float DeltaSeconds);
 	void ApplyZoom(float DeltaSeconds);
+
+	// Cursor ray intersected with the Z=0 ground plane.
+	bool DeprojectCursorToGround(FVector& OutGroundPos) const;
 
 	// Pending input accumulated each frame
 	float MoveForwardInput = 0.f;
@@ -85,7 +87,11 @@ private:
 
 	bool bRotateLeft  = false;
 	bool bRotateRight = false;
-	bool bDragRotate  = false;
+
+	// Middle-drag pan: ground point grabbed at drag start; ApplyDragPan keeps it
+	// under the cursor (editor-viewport feel).
+	bool    bDragPan   = false;
+	FVector DragAnchor = FVector::ZeroVector;
 
 	// Smoothed zoom target.
 	float TargetArmLength = 2500.f;

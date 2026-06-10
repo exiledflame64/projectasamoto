@@ -22,6 +22,11 @@ public class Realm : ModuleRules
 			"InputCore"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		// Slate for the in-game blueprint bar (no UMG assets; pure C++ UI).
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Slate",
+			"SlateCore"
+		});
 	}
 }
