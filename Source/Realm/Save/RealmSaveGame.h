@@ -1,6 +1,7 @@
 // Copyright Asamoto.
-// Phase 0 save stub: stores ONE dummy value so every later system plugs into a
-// working serialization pattern (see baoding.md "Don't defer save/load").
+// Phase 2 save: the full FSimWorld serialized into a byte blob (the arrays are
+// POD, so FSimWorld::Serialize writes them directly). TickCount kept as a
+// human-readable sanity value for logs.
 
 #pragma once
 
@@ -14,8 +15,9 @@ class REALM_API URealmSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	// Phase 0: round-trips the sim tick count. Phase 2+ serializes the FSimWorld
-	// arrays directly (the payoff of keeping sim data POD).
 	UPROPERTY()
 	int32 TickCount = 0;
+
+	UPROPERTY()
+	TArray<uint8> SimBytes;
 };

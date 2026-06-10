@@ -1,12 +1,14 @@
 // Copyright Asamoto.
-// Phase 1 debug visualizer: each frame it reads the sim snapshot and mirrors it
-// with placeholder shapes (cube lumberyard/storage, cylinder trees, cube villagers) and
-// an on-screen storage-log readout. Never writes to sim state.
+// Phase 2 debug visualizer: each frame it reads the sim snapshot and mirrors it
+// with placeholder shapes (tinted cubes per building type, cylinder trees, cube
+// villagers with state labels). Never writes to sim state. Proxies are pruned /
+// respawned when a loaded save shrinks or retypes the sim arrays.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Sim/SimTypes.h"
 #include "SimVisualizer.generated.h"
 
 class AAgentVisual;
@@ -33,6 +35,9 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<AStaticMeshActor>> BuildingVisuals;
 
+	// Type each building visual was spawned for (respawn on mismatch after load).
+	TArray<EBuildingType> BuildingVisualTypes;
+
 	UPROPERTY()
 	TArray<TObjectPtr<AStaticMeshActor>> TreeVisuals;
 
@@ -48,4 +53,6 @@ private:
 	AStaticMeshActor* SpawnShape(UStaticMesh* Mesh, const FVector& Scale,
 		const FLinearColor& Color);
 	FVector GetCameraLocation() const;
+	void PruneTo(int32 Count, TArray<TObjectPtr<AStaticMeshActor>>& Visuals,
+		TArray<EBuildingType>* Types);
 };

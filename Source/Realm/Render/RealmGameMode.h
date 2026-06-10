@@ -23,12 +23,16 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Realm")
 	float GroundHalfSize = 10000.f;
 
-	// Phase 1 starting world: trees on a ring around a central storage.
+	// Starting world: trees on a ring around a central stocked warehouse.
 	UPROPERTY(EditDefaultsOnly, Category = "Realm")
-	int32 NumTrees = 6;
+	int32 NumTrees = 10;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Realm")
 	float TreeRingRadius = 1500.f;
+
+	// Phase 2: food in the warehouse at game start (the starvation countdown).
+	UPROPERTY(EditDefaultsOnly, Category = "Realm")
+	int32 StartingFood = 10;
 
 private:
 	void SpawnGroundPlane();

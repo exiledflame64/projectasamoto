@@ -56,25 +56,45 @@ void AAgentVisual::BeginPlay()
 	}
 }
 
-void AAgentVisual::UpdateVisual(const FVector& GroundPos, EAgentState State,
-	int32 CarriedAmount, const FVector& CameraLocation)
+void AAgentVisual::UpdateVisual(const FAgentSnapshot& Snap, const FVector& CameraLocation)
 {
-	SetActorLocation(GroundPos);
+	// Starved agents simply vanish (Phase 2; a corpse/grave visual can come later).
+	if (Snap.State == EAgentState::Dead)
+	{
+		SetActorHiddenInGame(true);
+		return;
+	}
+	SetActorHiddenInGame(false);
+	SetActorLocation(Snap.Position);
 
 	FString StateText;
 	FLinearColor Color;
-	switch (State)
+	switch (Snap.State)
 	{
-	case EAgentState::MovingToWork:  StateText = TEXT("walking to tree"); Color = FLinearColor(1.f, 0.85f, 0.1f); break;
-	case EAgentState::Working:       StateText = TEXT("chopping");        Color = FLinearColor(0.9f, 0.3f, 0.1f);  break;
-	case EAgentState::MovingToStore: StateText = TEXT("returning");       Color = FLinearColor(0.2f, 0.8f, 0.3f);  break;
+	case EAgentState::MovingToWork:    StateText = TEXT("walking to tree"); Color = FLinearColor(1.f, 0.85f, 0.1f);  break;
+	case EAgentState::Working:         StateText = TEXT("chopping");        Color = FLinearColor(0.9f, 0.3f, 0.1f);  break;
+	case EAgentState::MovingToStore:   StateText = TEXT("returning");       Color = FLinearColor(0.2f, 0.8f, 0.3f);  break;
+	case EAgentState::MovingToPickup:  StateText = TEXT("fetching");        Color = FLinearColor(0.3f, 0.6f, 0.9f);  break;
+	case EAgentState::MovingToDeliver: StateText = TEXT("hauling");         Color = FLinearColor(0.2f, 0.45f, 0.95f); break;
 	case EAgentState::Idle:
-	default:                         StateText = TEXT("idle");            Color = FLinearColor(0.6f, 0.6f, 0.6f);  break;
+	default:                           StateText = TEXT("idle");            Color = FLinearColor(0.6f, 0.6f, 0.6f);  break;
 	}
 
-	if (CarriedAmount > 0)
+	if (Snap.CarriedAmount > 0)
 	{
-		StateText += FString::Printf(TEXT(" [log x%d]"), CarriedAmount);
+		const TCHAR* Res = TEXT("log");
+		switch (Snap.CarriedType)
+		{
+		case EResource::Plank: Res = TEXT("plank"); break;
+		case EResource::Food:  Res = TEXT("food");  break;
+		default: break;
+		}
+		StateText += FString::Printf(TEXT(" [%s x%d]"), Res, Snap.CarriedAmount);
+	}
+
+	if (Snap.bStarving)
+	{
+		StateText += TEXT(" (STARVING)");
 	}
 
 	Label->SetText(FText::FromString(StateText));

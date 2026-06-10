@@ -38,8 +38,10 @@ void ARealmGameMode::SeedSimWorld()
 
 	FSimWorld& Sim = Sub->GetSim();
 
-	// Central storage the villager deposits logs into.
-	Sim.PlaceBuilding(EBuildingType::Storage, FVector::ZeroVector);
+	// Central warehouse, stocked with starting food: the Phase 2 pressure clock —
+	// build a farm before the pantry empties or the settlement starves.
+	const FBuildingId WarehouseId = Sim.PlaceBuilding(EBuildingType::Warehouse, FVector::ZeroVector);
+	Sim.AddResource(WarehouseId, EResource::Food, StartingFood);
 
 	// A ring of trees to chop. Lumberyards + villagers arrive when the player builds.
 	for (int32 i = 0; i < NumTrees; ++i)
@@ -50,8 +52,8 @@ void ARealmGameMode::SeedSimWorld()
 		Sim.SpawnTree(Pos);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Realm] Seeded sim: 1 storage + %d trees. Pick a blueprint, then click the ground."),
-		NumTrees);
+	UE_LOG(LogTemp, Log, TEXT("[Realm] Seeded sim: 1 warehouse (%d food) + %d trees. Pick a blueprint, then click the ground."),
+		StartingFood, NumTrees);
 }
 
 void ARealmGameMode::SpawnVisualizer()

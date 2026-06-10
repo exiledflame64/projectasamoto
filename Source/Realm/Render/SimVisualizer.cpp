@@ -13,7 +13,6 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
 
 namespace
 {
@@ -21,7 +20,23 @@ namespace
 	// shape sits on the ground when lifted by half its scaled height.
 	float GroundLift(const AActor* A) { return 50.f * A->GetActorScale3D().Z; }
 
-	constexpr uint64 StorageMsgKey = 1001;
+	struct FBuildingLook
+	{
+		FVector      Scale;
+		FLinearColor Color;
+	};
+
+	FBuildingLook LookFor(EBuildingType Type)
+	{
+		switch (Type)
+		{
+		case EBuildingType::Warehouse:  return { FVector(2.5f, 2.5f, 2.0f), FLinearColor(0.15f, 0.4f, 0.9f)  };
+		case EBuildingType::Sawmill:    return { FVector(2.2f, 2.2f, 1.8f), FLinearColor(0.85f, 0.45f, 0.1f) };
+		case EBuildingType::Farm:       return { FVector(2.4f, 2.4f, 1.2f), FLinearColor(0.55f, 0.7f, 0.15f) };
+		case EBuildingType::Lumberyard:
+		default:                        return { FVector(2.0f, 2.0f, 1.5f), FLinearColor(0.5f, 0.3f, 0.12f)  };
+		}
+	}
 }
 
 ASimVisualizer::ASimVisualizer()
@@ -100,17 +115,27 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 	const FSimSnapshot& Snap = Sub->GetSnapshot();
 	const FVector CamLoc = GetCameraLocation();
 
-	// --- Buildings (cube: brown lumberyard / blue storage) ---
+	// --- Buildings (tinted cubes per type) ---
 	for (int32 i = 0; i < Snap.Buildings.Num(); ++i)
 	{
+		const EBuildingType Type = Snap.Buildings[i].Type;
+
+		// Respawn when the type at this index changed (happens after a load).
+		if (BuildingVisuals.IsValidIndex(i) && BuildingVisualTypes[i] != Type)
+		{
+			if (BuildingVisuals[i])
+			{
+				BuildingVisuals[i]->Destroy();
+			}
+			const FBuildingLook Look = LookFor(Type);
+			BuildingVisuals[i]      = SpawnShape(CubeMesh, Look.Scale, Look.Color);
+			BuildingVisualTypes[i]  = Type;
+		}
 		if (i >= BuildingVisuals.Num())
 		{
-			const bool bStorage = (Snap.Buildings[i].Type == EBuildingType::Storage);
-			const FVector Scale  = bStorage ? FVector(2.5f, 2.5f, 2.0f) : FVector(2.0f, 2.0f, 1.5f);
-			const FLinearColor Color = bStorage
-				? FLinearColor(0.15f, 0.4f, 0.9f)   // storage blue
-				: FLinearColor(0.5f, 0.3f, 0.12f);  // lumberyard brown
-			BuildingVisuals.Add(SpawnShape(CubeMesh, Scale, Color));
+			const FBuildingLook Look = LookFor(Type);
+			BuildingVisuals.Add(SpawnShape(CubeMesh, Look.Scale, Look.Color));
+			BuildingVisualTypes.Add(Type);
 		}
 		if (AStaticMeshActor* A = BuildingVisuals[i])
 		{
@@ -145,16 +170,36 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 		}
 		if (AAgentVisual* V = AgentVisuals[i])
 		{
-			const FAgentSnapshot& A = Snap.Agents[i];
-			V->UpdateVisual(A.Position, A.State, A.CarriedAmount, CamLoc);
+			V->UpdateVisual(Snap.Agents[i], CamLoc);
 		}
 	}
 
-	// --- Storage readout ---
-	if (GEngine)
+	// --- Prune proxies beyond the snapshot (arrays shrink after a load) ---
+	PruneTo(Snap.Buildings.Num(), BuildingVisuals, &BuildingVisualTypes);
+	PruneTo(Snap.Trees.Num(), TreeVisuals, nullptr);
+	while (AgentVisuals.Num() > Snap.Agents.Num())
 	{
-		GEngine->AddOnScreenDebugMessage(StorageMsgKey, 0.f, FColor::Cyan,
-			FString::Printf(TEXT("Storage logs: %d   (sim tick %lld)"),
-				Snap.StorageLogCount, Snap.TickNumber));
+		if (AgentVisuals.Last())
+		{
+			AgentVisuals.Last()->Destroy();
+		}
+		AgentVisuals.Pop();
+	}
+}
+
+void ASimVisualizer::PruneTo(int32 Count, TArray<TObjectPtr<AStaticMeshActor>>& Visuals,
+	TArray<EBuildingType>* Types)
+{
+	while (Visuals.Num() > Count)
+	{
+		if (Visuals.Last())
+		{
+			Visuals.Last()->Destroy();
+		}
+		Visuals.Pop();
+		if (Types)
+		{
+			Types->Pop();
+		}
 	}
 }

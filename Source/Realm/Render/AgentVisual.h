@@ -22,8 +22,7 @@ public:
 	AAgentVisual();
 
 	// Called each frame by the visualizer with fresh snapshot data.
-	void UpdateVisual(const FVector& GroundPos, EAgentState State, int32 CarriedAmount,
-		const FVector& CameraLocation);
+	void UpdateVisual(const FAgentSnapshot& Snap, const FVector& CameraLocation);
 
 protected:
 	virtual void BeginPlay() override;

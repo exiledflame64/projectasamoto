@@ -8,6 +8,8 @@
 #include "GameFramework/InputSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
+#include "Serialization/MemoryReader.h"
+#include "Serialization/MemoryWriter.h"
 
 #include "Core/SimSubsystem.h"
 #include "Save/RealmSaveGame.h"
@@ -264,9 +266,15 @@ void ARTSCameraPawn::OnSaveGame()
 	}
 
 	SaveObj->TickCount = static_cast<int32>(SimSub->GetSim().GetTickNumber());
+
+	// Phase 2: serialize the whole sim world (agents, buildings, trees).
+	FMemoryWriter Writer(SaveObj->SimBytes);
+	SimSub->GetSim().Serialize(Writer);
+
 	const bool bOk = UGameplayStatics::SaveGameToSlot(SaveObj, SaveSlotName, SaveUserIndex);
-	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Save %s slot='%s' TickCount=%d"),
-		bOk ? TEXT("OK") : TEXT("FAILED"), *SaveSlotName, SaveObj->TickCount);
+	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Save %s slot='%s' Tick=%d SimBytes=%d"),
+		bOk ? TEXT("OK") : TEXT("FAILED"), *SaveSlotName, SaveObj->TickCount,
+		SaveObj->SimBytes.Num());
 }
 
 void ARTSCameraPawn::OnLoadGame()
@@ -285,15 +293,17 @@ void ARTSCameraPawn::OnLoadGame()
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Load OK slot='%s' TickCount=%d (round-trip verified)"),
-		*SaveSlotName, Loaded->TickCount);
-
-	// Demonstrate the value actually round-trips into the sim.
+	// Phase 2: restore the whole sim world. The visualizer reconciles its proxy
+	// actors against the (possibly smaller) loaded arrays on its next tick.
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (USimSubsystem* SimSub = GI->GetSubsystem<USimSubsystem>())
 		{
-			SimSub->GetSim().SetTickNumber(Loaded->TickCount);
+			FMemoryReader Reader(Loaded->SimBytes);
+			SimSub->GetSim().Serialize(Reader);
 		}
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Load OK slot='%s' Tick=%d SimBytes=%d"),
+		*SaveSlotName, Loaded->TickCount, Loaded->SimBytes.Num());
 }

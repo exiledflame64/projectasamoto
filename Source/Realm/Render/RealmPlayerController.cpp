@@ -2,6 +2,7 @@
 
 #include "RealmPlayerController.h"
 #include "SBlueprintBar.h"
+#include "SResourcePanel.h"
 #include "Core/SimSubsystem.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -25,16 +26,53 @@ void ARealmPlayerController::BeginPlay()
 			.OnBlueprintClicked(SBlueprintBar::FOnBlueprintClicked::CreateUObject(
 				this, &ARealmPlayerController::HandleBlueprintClicked));
 		GEngine->GameViewport->AddViewportWidgetContent(BlueprintBar.ToSharedRef(), /*ZOrder=*/10);
+
+		// Resource readout polls the snapshot through weak attribute lambdas, so
+		// it stays a pure reader of sim state (hard rule #2).
+		TWeakObjectPtr<UGameInstance> WeakGI = GetGameInstance();
+		const auto GetSnapshot = [WeakGI]() -> const FSimSnapshot*
+		{
+			const UGameInstance* GI = WeakGI.Get();
+			const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+			return Sub ? &Sub->GetSnapshot() : nullptr;
+		};
+
+		SAssignNew(ResourcePanel, SResourcePanel)
+			.ResourceText(TAttribute<FText>::CreateLambda([GetSnapshot]
+			{
+				if (const FSimSnapshot* S = GetSnapshot())
+				{
+					return FText::Format(
+						NSLOCTEXT("Realm", "ResourceReadout",
+							"Wood: {0}   Planks: {1}   Food: {2}   Population: {3}"),
+						S->LogCount, S->PlankCount, S->FoodCount, S->Population);
+				}
+				return FText::GetEmpty();
+			}))
+			.GameOverVisibility(TAttribute<EVisibility>::CreateLambda([GetSnapshot]
+			{
+				const FSimSnapshot* S = GetSnapshot();
+				return (S && S->bGameOver) ? EVisibility::HitTestInvisible : EVisibility::Collapsed;
+			}));
+		GEngine->GameViewport->AddViewportWidgetContent(ResourcePanel.ToSharedRef(), /*ZOrder=*/11);
 	}
 }
 
 void ARealmPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (BlueprintBar.IsValid() && GEngine && GEngine->GameViewport)
+	if (GEngine && GEngine->GameViewport)
 	{
-		GEngine->GameViewport->RemoveViewportWidgetContent(BlueprintBar.ToSharedRef());
+		if (BlueprintBar.IsValid())
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent(BlueprintBar.ToSharedRef());
+		}
+		if (ResourcePanel.IsValid())
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent(ResourcePanel.ToSharedRef());
+		}
 	}
 	BlueprintBar.Reset();
+	ResourcePanel.Reset();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -69,10 +107,10 @@ void ARealmPlayerController::HandleBlueprintClicked(EBlueprintKind Kind)
 
 void ARealmPlayerController::OnPlaceBuilding()
 {
-	// No blueprint armed: clicks on the ground do nothing.
-	if (SelectedBlueprint != EBlueprintKind::Building)
+	const FBlueprintDef* Def = FindBlueprintDef(SelectedBlueprint);
+	if (!Def || !Def->bAvailable)
 	{
-		return;
+		return;   // no blueprint armed: clicks on the ground do nothing
 	}
 
 	FHitResult Hit;
@@ -92,7 +130,7 @@ void ARealmPlayerController::OnPlaceBuilding()
 	Loc.Z = 0.f;   // sim lives on the ground plane
 
 	FSimWorld& Sim = Sub->GetSim();
-	Sim.PlaceBuilding(EBuildingType::Lumberyard, Loc);
+	Sim.PlaceBuilding(Def->BuildingType, Loc);
 
 	// Each building brings its own villagers, spread on a ring beside it.
 	for (int32 i = 0; i < VillagersPerBuilding; ++i)
@@ -102,6 +140,6 @@ void ARealmPlayerController::OnPlaceBuilding()
 	}
 
 	// Blueprint stays armed so several buildings can be placed in a row.
-	UE_LOG(LogTemp, Log, TEXT("[Realm] Lumberyard placed at %s (+%d villagers)."),
-		*Loc.ToString(), VillagersPerBuilding);
+	UE_LOG(LogTemp, Log, TEXT("[Realm] %s placed at %s (+%d villagers)."),
+		*Def->DisplayName.ToString(), *Loc.ToString(), VillagersPerBuilding);
 }

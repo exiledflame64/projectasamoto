@@ -8,20 +8,24 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Sim/SimTypes.h"
 
 enum class EBlueprintKind : uint8
 {
 	None,
-	Building,   // Phase 1: lumberyard (spawns its villagers automatically)
-	Farm        // Phase 2 placeholder; listed but not yet available
+	Lumberyard,
+	Sawmill,    // Phase 2: logs -> planks
+	Farm        // Phase 2: food source
 };
 
 struct FBlueprintDef
 {
 	EBlueprintKind Kind = EBlueprintKind::None;
+	EBuildingType  BuildingType = EBuildingType::None;   // what placement spawns
 	FText          DisplayName;
 	bool           bAvailable = false;   // false = "coming soon", greyed out in UI
 };
 
 // Static catalog; order defines UI order.
 REALM_API const TArray<FBlueprintDef>& GetBlueprintCatalog();
+REALM_API const FBlueprintDef* FindBlueprintDef(EBlueprintKind Kind);

@@ -11,6 +11,7 @@
 #include "RealmPlayerController.generated.h"
 
 class SBlueprintBar;
+class SResourcePanel;
 
 UCLASS()
 class REALM_API ARealmPlayerController : public APlayerController
@@ -22,14 +23,16 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
 
-	// Villagers spawned automatically beside each placed building.
+	// Villagers spawned automatically beside each placed building. Phase 2 runs
+	// a multi-villager economy, so each building brings a small crew.
 	UPROPERTY(EditAnywhere, Category = "Realm", meta = (ClampMin = "0"))
-	int32 VillagersPerBuilding = 1;
+	int32 VillagersPerBuilding = 3;
 
 private:
 	void OnPlaceBuilding();
 	void HandleBlueprintClicked(EBlueprintKind Kind);
 
 	TSharedPtr<SBlueprintBar> BlueprintBar;
+	TSharedPtr<SResourcePanel> ResourcePanel;
 	EBlueprintKind SelectedBlueprint = EBlueprintKind::None;
 };
