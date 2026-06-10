@@ -33,6 +33,7 @@ namespace
 		case EBuildingType::Warehouse:  return { FVector(2.5f, 2.5f, 2.0f), FLinearColor(0.15f, 0.4f, 0.9f)  };
 		case EBuildingType::Sawmill:    return { FVector(2.2f, 2.2f, 1.8f), FLinearColor(0.85f, 0.45f, 0.1f) };
 		case EBuildingType::Farm:       return { FVector(2.4f, 2.4f, 1.2f), FLinearColor(0.55f, 0.7f, 0.15f) };
+		case EBuildingType::House:      return { FVector(1.5f, 1.5f, 1.2f), FLinearColor(0.85f, 0.8f, 0.7f)  };
 		case EBuildingType::Lumberyard:
 		default:                        return { FVector(2.0f, 2.0f, 1.5f), FLinearColor(0.5f, 0.3f, 0.12f)  };
 		}
@@ -127,19 +128,35 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 			{
 				BuildingVisuals[i]->Destroy();
 			}
+			if (FieldVisuals.IsValidIndex(i) && FieldVisuals[i])
+			{
+				FieldVisuals[i]->Destroy();
+				FieldVisuals[i] = nullptr;
+			}
 			const FBuildingLook Look = LookFor(Type);
 			BuildingVisuals[i]      = SpawnShape(CubeMesh, Look.Scale, Look.Color);
 			BuildingVisualTypes[i]  = Type;
+			if (Type == EBuildingType::Farm)
+			{
+				FieldVisuals[i] = SpawnFieldPlot();
+			}
 		}
 		if (i >= BuildingVisuals.Num())
 		{
 			const FBuildingLook Look = LookFor(Type);
 			BuildingVisuals.Add(SpawnShape(CubeMesh, Look.Scale, Look.Color));
 			BuildingVisualTypes.Add(Type);
+			FieldVisuals.Add(Type == EBuildingType::Farm ? SpawnFieldPlot() : nullptr);
 		}
 		if (AStaticMeshActor* A = BuildingVisuals[i])
 		{
 			A->SetActorLocation(Snap.Buildings[i].Position + FVector(0.f, 0.f, GroundLift(A)));
+		}
+		// Field plot (the farm's sub-building) sits beside the farm.
+		if (FieldVisuals.IsValidIndex(i) && FieldVisuals[i])
+		{
+			FieldVisuals[i]->SetActorLocation(
+				Snap.Buildings[i].Position + FVector(FarmFieldOffset, 0.f, 1.f));
 		}
 	}
 
@@ -175,6 +192,14 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 	}
 
 	// --- Prune proxies beyond the snapshot (arrays shrink after a load) ---
+	while (FieldVisuals.Num() > Snap.Buildings.Num())
+	{
+		if (FieldVisuals.Last())
+		{
+			FieldVisuals.Last()->Destroy();
+		}
+		FieldVisuals.Pop();
+	}
 	PruneTo(Snap.Buildings.Num(), BuildingVisuals, &BuildingVisualTypes);
 	PruneTo(Snap.Trees.Num(), TreeVisuals, nullptr);
 	while (AgentVisuals.Num() > Snap.Agents.Num())
@@ -185,6 +210,15 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 		}
 		AgentVisuals.Pop();
 	}
+}
+
+// Flat tilled-earth plot marking the farm's attached field (where its workers
+// tend). Footprint matches the sim's work-spot area.
+AStaticMeshActor* ASimVisualizer::SpawnFieldPlot()
+{
+	const float PlotScale = (FarmFieldHalfSize * 2.f) / 100.f;   // cube is 100 uu
+	return SpawnShape(CubeMesh, FVector(PlotScale, PlotScale, 0.04f),
+		FLinearColor(0.45f, 0.33f, 0.16f));
 }
 
 void ASimVisualizer::PruneTo(int32 Count, TArray<TObjectPtr<AStaticMeshActor>>& Visuals,

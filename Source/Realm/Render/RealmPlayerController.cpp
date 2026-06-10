@@ -3,6 +3,7 @@
 #include "RealmPlayerController.h"
 #include "SBlueprintBar.h"
 #include "SResourcePanel.h"
+#include "SWorkerPanel.h"
 #include "Core/SimSubsystem.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -21,49 +22,59 @@ void ARealmPlayerController::BeginPlay()
 	InputMode.SetHideCursorDuringCapture(false);
 	SetInputMode(InputMode);
 
-	if (GEngine && GEngine->GameViewport)
+	if (!GEngine || !GEngine->GameViewport)
 	{
-		SAssignNew(BlueprintBar, SBlueprintBar)
-			.OnBlueprintClicked(SBlueprintBar::FOnBlueprintClicked::CreateUObject(
-				this, &ARealmPlayerController::HandleBlueprintClicked));
-		GEngine->GameViewport->AddViewportWidgetContent(BlueprintBar.ToSharedRef(), /*ZOrder=*/10);
+		return;
+	}
 
-		// Resource readout polls the snapshot through weak attribute lambdas, so
-		// it stays a pure reader of sim state (hard rule #2).
-		TWeakObjectPtr<UGameInstance> WeakGI = GetGameInstance();
-		const auto GetSnapshot = [WeakGI]() -> const FSimSnapshot*
+	// Snapshot access for the polling widgets: always through the subsystem,
+	// so the UI stays a pure reader of sim state (hard rule #2).
+	TWeakObjectPtr<UGameInstance> WeakGI = GetGameInstance();
+	const auto GetSnapshot = [WeakGI]() -> const FSimSnapshot*
+	{
+		const UGameInstance* GI = WeakGI.Get();
+		const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+		return Sub ? &Sub->GetSnapshot() : nullptr;
+	};
+
+	SAssignNew(BlueprintBar, SBlueprintBar)
+		.OnBlueprintClicked(SBlueprintBar::FOnBlueprintClicked::CreateUObject(
+			this, &ARealmPlayerController::HandleBlueprintClicked));
+	GEngine->GameViewport->AddViewportWidgetContent(BlueprintBar.ToSharedRef(), /*ZOrder=*/10);
+
+	SAssignNew(ResourcePanel, SResourcePanel)
+		.ResourceText(TAttribute<FText>::CreateLambda([GetSnapshot]
+		{
+			if (const FSimSnapshot* S = GetSnapshot())
+			{
+				return FText::Format(
+					NSLOCTEXT("Realm", "ResourceReadout",
+						"Wood: {0}   Planks: {1}   Food: {2}   Population: {3} (idle {4})"),
+					S->LogCount, S->PlankCount, S->FoodCount, S->Population, S->IdleVillagers);
+			}
+			return FText::GetEmpty();
+		}))
+		.GameOverVisibility(TAttribute<EVisibility>::CreateLambda([GetSnapshot]
+		{
+			const FSimSnapshot* S = GetSnapshot();
+			return (S && S->bGameOver) ? EVisibility::HitTestInvisible : EVisibility::Collapsed;
+		}))
+		.PausedVisibility(TAttribute<EVisibility>::CreateLambda([WeakGI]
 		{
 			const UGameInstance* GI = WeakGI.Get();
 			const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
-			return Sub ? &Sub->GetSnapshot() : nullptr;
-		};
+			return (Sub && Sub->IsSimPaused())
+				? EVisibility::HitTestInvisible : EVisibility::Collapsed;
+		}));
+	GEngine->GameViewport->AddViewportWidgetContent(ResourcePanel.ToSharedRef(), /*ZOrder=*/11);
 
-		SAssignNew(ResourcePanel, SResourcePanel)
-			.ResourceText(TAttribute<FText>::CreateLambda([GetSnapshot]
-			{
-				if (const FSimSnapshot* S = GetSnapshot())
-				{
-					return FText::Format(
-						NSLOCTEXT("Realm", "ResourceReadout",
-							"Wood: {0}   Planks: {1}   Food: {2}   Population: {3}"),
-						S->LogCount, S->PlankCount, S->FoodCount, S->Population);
-				}
-				return FText::GetEmpty();
-			}))
-			.GameOverVisibility(TAttribute<EVisibility>::CreateLambda([GetSnapshot]
-			{
-				const FSimSnapshot* S = GetSnapshot();
-				return (S && S->bGameOver) ? EVisibility::HitTestInvisible : EVisibility::Collapsed;
-			}))
-			.PausedVisibility(TAttribute<EVisibility>::CreateLambda([WeakGI]
-			{
-				const UGameInstance* GI = WeakGI.Get();
-				const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
-				return (Sub && Sub->IsSimPaused())
-					? EVisibility::HitTestInvisible : EVisibility::Collapsed;
-			}));
-		GEngine->GameViewport->AddViewportWidgetContent(ResourcePanel.ToSharedRef(), /*ZOrder=*/11);
-	}
+	SAssignNew(WorkerPanel, SWorkerPanel)
+		.GetSnapshot(GetSnapshot)
+		.OnAssign(SWorkerPanel::FOnWorkerChange::CreateUObject(
+			this, &ARealmPlayerController::HandleAssignWorker))
+		.OnUnassign(SWorkerPanel::FOnWorkerChange::CreateUObject(
+			this, &ARealmPlayerController::HandleUnassignWorker));
+	GEngine->GameViewport->AddViewportWidgetContent(WorkerPanel.ToSharedRef(), /*ZOrder=*/12);
 }
 
 void ARealmPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -78,9 +89,14 @@ void ARealmPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		{
 			GEngine->GameViewport->RemoveViewportWidgetContent(ResourcePanel.ToSharedRef());
 		}
+		if (WorkerPanel.IsValid())
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent(WorkerPanel.ToSharedRef());
+		}
 	}
 	BlueprintBar.Reset();
 	ResourcePanel.Reset();
+	WorkerPanel.Reset();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -102,6 +118,34 @@ void ARealmPlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	const UGameInstance* GI = GetGameInstance();
+	const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+	if (!Sub)
+	{
+		return;
+	}
+	const FSimSnapshot& Snap = Sub->GetSnapshot();
+
+	// Workforce rows track the building list; warehouse blueprint greys out
+	// while one exists (hard limit of 1, also enforced by the sim).
+	if (WorkerPanel.IsValid())
+	{
+		WorkerPanel->Refresh();
+	}
+	if (BlueprintBar.IsValid())
+	{
+		bool bHasWarehouse = false;
+		for (const FBuildingSnapshot& B : Snap.Buildings)
+		{
+			if (B.Type == EBuildingType::Warehouse)
+			{
+				bHasWarehouse = true;
+				break;
+			}
+		}
+		BlueprintBar->SetEntryEnabled(EBlueprintKind::Warehouse, !bHasWarehouse);
+	}
+
 	// Placement ghost: with a blueprint armed, show the footprint under the
 	// cursor, green when the spot is valid, red when the sim would refuse it.
 	const FBlueprintDef* Def = FindBlueprintDef(SelectedBlueprint);
@@ -116,22 +160,25 @@ void ARealmPlayerController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	const UGameInstance* GI = GetGameInstance();
-	const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
-	if (!Sub)
-	{
-		return;
-	}
-
 	// Generic footprint extent (debug-art scale; per-type sizes live render-side).
 	const FVector Half(120.f, 120.f, 80.f);
 	const FVector Center = Loc + FVector(0.f, 0.f, Half.Z);
-	const bool bValid = Sub->GetSim().CanPlaceBuilding(Loc);
+	const bool bValid = Sub->GetSim().CanPlaceBuilding(Def->BuildingType, Loc);
 
 	const FColor Fill = bValid ? FColor(30, 200, 80, 70) : FColor(220, 45, 30, 70);
 	const FColor Line = bValid ? FColor(40, 230, 100)    : FColor(255, 60, 40);
 	DrawDebugSolidBox(GetWorld(), Center, Half, Fill);
 	DrawDebugBox(GetWorld(), Center, Half, Line);
+
+	// A farm also claims its field plot — preview it so the red/green verdict
+	// is legible.
+	if (Def->BuildingType == EBuildingType::Farm)
+	{
+		const FVector FieldHalf(FarmFieldHalfSize, FarmFieldHalfSize, 6.f);
+		const FVector FieldCenter = Loc + FVector(FarmFieldOffset, 0.f, FieldHalf.Z);
+		DrawDebugSolidBox(GetWorld(), FieldCenter, FieldHalf, Fill);
+		DrawDebugBox(GetWorld(), FieldCenter, FieldHalf, Line);
+	}
 }
 
 bool ARealmPlayerController::TraceCursorToGround(FVector& OutLoc) const
@@ -172,6 +219,32 @@ void ARealmPlayerController::HandleBlueprintClicked(EBlueprintKind Kind)
 	}
 }
 
+void ARealmPlayerController::HandleAssignWorker(int32 BuildingIndex)
+{
+	UGameInstance* GI = GetGameInstance();
+	if (USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr)
+	{
+		Sub->GetSim().AssignWorkerTo(BuildingIndex);
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+}
+
+void ARealmPlayerController::HandleUnassignWorker(int32 BuildingIndex)
+{
+	UGameInstance* GI = GetGameInstance();
+	if (USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr)
+	{
+		Sub->GetSim().UnassignWorkerFrom(BuildingIndex);
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+}
+
 void ARealmPlayerController::OnPlaceBuilding()
 {
 	const FBlueprintDef* Def = FindBlueprintDef(SelectedBlueprint);
@@ -194,19 +267,33 @@ void ARealmPlayerController::OnPlaceBuilding()
 	}
 
 	FSimWorld& Sim = Sub->GetSim();
-	if (Sim.PlaceBuilding(Def->BuildingType, Loc) == INVALID_ID)
+	const FBuildingId Id = Sim.PlaceBuilding(Def->BuildingType, Loc);
+	if (Id == INVALID_ID)
 	{
 		return;   // invalid spot (ghost was red); keep the blueprint armed
 	}
 
-	// Each building brings its own villagers, spread on a ring beside it.
-	for (int32 i = 0; i < VillagersPerBuilding; ++i)
+	switch (Def->BuildingType)
 	{
-		const float Angle = (2.f * PI * i) / FMath::Max(VillagersPerBuilding, 1);
-		Sim.SpawnAgent(Loc + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * 120.f);
+	case EBuildingType::House:
+		// A house brings exactly one villager, idle until assigned.
+		Sim.SpawnAgent(Loc + FVector(120.f, 0.f, 0.f));
+		break;
+
+	case EBuildingType::Warehouse:
+		// Stock the (single) warehouse and disarm — there is nothing more to place.
+		Sim.AddResource(Id, EResource::Food, WarehouseStartingFood);
+		SelectedBlueprint = EBlueprintKind::None;
+		if (BlueprintBar.IsValid())
+		{
+			BlueprintBar->SetSelected(SelectedBlueprint);
+		}
+		break;
+
+	default:
+		break;   // resource buildings: stays armed for repeat placement
 	}
 
-	// Blueprint stays armed so several buildings can be placed in a row.
-	UE_LOG(LogTemp, Log, TEXT("[Realm] %s placed at %s (+%d villagers)."),
-		*Def->DisplayName.ToString(), *Loc.ToString(), VillagersPerBuilding);
+	UE_LOG(LogTemp, Log, TEXT("[Realm] %s placed at %s."),
+		*Def->DisplayName.ToString(), *Loc.ToString());
 }

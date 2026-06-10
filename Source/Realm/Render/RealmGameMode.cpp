@@ -3,8 +3,10 @@
 #include "RealmGameMode.h"
 #include "RTSCameraPawn.h"
 #include "RealmPlayerController.h"
+#include "RealmSeeds.h"
 #include "SimVisualizer.h"
 #include "Core/SimSubsystem.h"
+#include "EngineUtils.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -36,14 +38,19 @@ void ARealmGameMode::SeedSimWorld()
 		return;
 	}
 
+	// A level that contains seed actors authors its own starting layout (each
+	// seed registers itself into the sim); procedural seeding is only the
+	// fallback for empty maps.
+	if (TActorIterator<AResourceSeed>(GetWorld()) || TActorIterator<ABuildingSeed>(GetWorld()))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Realm] Level provides seed actors; skipping procedural seeding."));
+		return;
+	}
+
 	FSimWorld& Sim = Sub->GetSim();
 
-	// Central warehouse, stocked with starting food: the Phase 2 pressure clock —
-	// build a farm before the pantry empties or the settlement starves.
-	const FBuildingId WarehouseId = Sim.PlaceBuilding(EBuildingType::Warehouse, FVector::ZeroVector);
-	Sim.AddResource(WarehouseId, EResource::Food, StartingFood);
-
-	// A ring of trees to chop. Lumberyards + villagers arrive when the player builds.
+	// A ring of trees to chop. Everything else — warehouse included — is
+	// placed by the player (warehouse first; houses bring the villagers).
 	for (int32 i = 0; i < NumTrees; ++i)
 	{
 		const float Angle = (2.f * PI * i) / FMath::Max(NumTrees, 1);
@@ -52,8 +59,8 @@ void ARealmGameMode::SeedSimWorld()
 		Sim.SpawnTree(Pos);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Realm] Seeded sim: 1 warehouse (%d food) + %d trees. Pick a blueprint, then click the ground."),
-		StartingFood, NumTrees);
+	UE_LOG(LogTemp, Log, TEXT("[Realm] Seeded sim: %d trees. Place a warehouse, then houses for villagers."),
+		NumTrees);
 }
 
 void ARealmGameMode::SpawnVisualizer()
@@ -71,6 +78,15 @@ void ARealmGameMode::SpawnGroundPlane()
 	if (!World)
 	{
 		return;
+	}
+
+	// A level can place its own ground (tag an actor "RealmGround").
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (It->ActorHasTag(TEXT("RealmGround")))
+		{
+			return;
+		}
 	}
 
 	// Engine's 1x1 m basic plane (100 uu). Scale up to the desired half-size.

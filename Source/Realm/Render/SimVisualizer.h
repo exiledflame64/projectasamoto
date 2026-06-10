@@ -38,6 +38,10 @@ private:
 	// Type each building visual was spawned for (respawn on mismatch after load).
 	TArray<EBuildingType> BuildingVisualTypes;
 
+	// Farm field plots, aligned with BuildingVisuals (nullptr for non-farms).
+	UPROPERTY()
+	TArray<TObjectPtr<AStaticMeshActor>> FieldVisuals;
+
 	UPROPERTY()
 	TArray<TObjectPtr<AStaticMeshActor>> TreeVisuals;
 
@@ -52,6 +56,7 @@ private:
 
 	AStaticMeshActor* SpawnShape(UStaticMesh* Mesh, const FVector& Scale,
 		const FLinearColor& Color);
+	AStaticMeshActor* SpawnFieldPlot();
 	FVector GetCameraLocation() const;
 	void PruneTo(int32 Count, TArray<TObjectPtr<AStaticMeshActor>>& Visuals,
 		TArray<EBuildingType>* Types);

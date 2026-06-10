@@ -13,9 +13,11 @@
 enum class EBlueprintKind : uint8
 {
 	None,
+	House,       // grants 1 idle villager
+	Warehouse,   // settlement stockpile; max 1 (bar greys it out once placed)
 	Lumberyard,
-	Sawmill,    // Phase 2: logs -> planks
-	Farm        // Phase 2: food source
+	Sawmill,     // logs -> planks
+	Farm         // food source (workers tend the attached field)
 };
 
 struct FBlueprintDef

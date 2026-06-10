@@ -5,20 +5,30 @@
 const TArray<FBlueprintDef>& GetBlueprintCatalog()
 {
 	static const TArray<FBlueprintDef> Catalog = {
+		{ EBlueprintKind::House,      EBuildingType::House,
+			NSLOCTEXT("Realm", "BP_House",      "House"),
+			NSLOCTEXT("Realm", "TT_House",
+				"Brings 1 villager to the settlement.\nNew villagers are idle until you assign them to a building."),
+			true },
+		{ EBlueprintKind::Warehouse,  EBuildingType::Warehouse,
+			NSLOCTEXT("Realm", "BP_Warehouse",  "Warehouse"),
+			NSLOCTEXT("Realm", "TT_Warehouse",
+				"The settlement stockpile — all goods end up here and villagers eat from it.\nNeeds no workers. Limit: 1."),
+			true },
 		{ EBlueprintKind::Lumberyard, EBuildingType::Lumberyard,
 			NSLOCTEXT("Realm", "BP_Lumberyard", "Lumberyard"),
 			NSLOCTEXT("Realm", "TT_Lumberyard",
-				"Sends villagers to chop trees.\nLogs are carried to the warehouse."),
+				"Assigned villagers chop trees and carry logs to the warehouse."),
 			true },
 		{ EBlueprintKind::Sawmill,    EBuildingType::Sawmill,
 			NSLOCTEXT("Realm", "BP_Sawmill",    "Sawmill"),
 			NSLOCTEXT("Realm", "TT_Sawmill",
-				"Saws logs into planks.\nHaulers feed it logs from the warehouse and carry planks back."),
+				"Saws logs into planks.\nAssigned villagers feed it logs from the warehouse and carry planks back."),
 			true },
 		{ EBlueprintKind::Farm,       EBuildingType::Farm,
 			NSLOCTEXT("Realm", "BP_Farm",       "Farm"),
 			NSLOCTEXT("Realm", "TT_Farm",
-				"Grows food over time.\nHaulers stock it in the warehouse; villagers eat 1 food every 20 s."),
+				"Assigned villagers tend the attached field and carry harvested food to the warehouse.\nVillagers eat 1 food every 20 s."),
 			true },
 	};
 	return Catalog;

@@ -19,12 +19,12 @@ UENUM(BlueprintType)
 enum class EAgentState : uint8
 {
 	Idle,
-	MovingToWork,     // walking to a tree to chop
-	Working,          // chopping
-	MovingToStore,    // carrying a chopped log to the warehouse
-	MovingToPickup,   // Phase 2: walking to collect a hauled resource
-	MovingToDeliver,  // Phase 2: carrying a hauled resource to its destination
-	Dead              // Phase 2: starved; ignored by all systems, hidden by render
+	MovingToWork,     // walking to a workspace to gather goods
+	Working,          // chopping / tending the field, etc
+	MovingToStore,    // carrying a good to the warehouse
+	MovingToPickup,   // walking to collect a hauled resource
+	MovingToDeliver,  // carrying a hauled resource to its destination
+	Dead              // starved; ignored by all systems, hidden by render
 };
 
 UENUM(BlueprintType)
@@ -32,9 +32,10 @@ enum class EBuildingType : uint8
 {
 	None,
 	Lumberyard,
-	Warehouse,   // settlement stockpile; villagers are fed from here
-	Sawmill,     // Phase 2: consumes logs, produces planks
-	Farm         // Phase 2: produces food
+	Warehouse,   // settlement stockpile; villagers are fed from here. Max 1. No workers.
+	Sawmill,     // consumes logs, produces planks
+	Farm,        // workers tend the attached field, harvest food
+	House        // grants 1 villager when placed
 };
 
 UENUM(BlueprintType)
@@ -42,20 +43,27 @@ enum class EResource : uint8
 {
 	None,
 	Log,
-	Plank,   // Phase 2
-	Food,    // Phase 2
+	Plank,
+	Food,
 	MAX UMETA(Hidden)
 };
 static constexpr int32 NumResources = static_cast<int32>(EResource::MAX);
 
-// Phase 2: what an agent intends to do when it reaches its destination.
+// What an agent intends to do when it reaches its destination. Jobs are only
+// ever emitted by the building the agent is assigned to.
 enum class EJobKind : uint8
 {
 	None,
-	Chop,         // lumberyard job: chop a tree, carry the log to the warehouse
-	HaulOutput,   // collect a producer's output, deliver it to the warehouse
-	FeedSawmill   // take a log from the warehouse, deliver it to a sawmill's input
+	Chop,         // lumberyard: chop a tree, carry the log to the warehouse
+	WorkField,    // farm: tend a spot in the attached field, harvest food
+	HaulOutput,   // sawmill: collect finished planks, deliver to the warehouse
+	FeedSawmill   // sawmill: take a log from the warehouse, deliver to its input
 };
+
+// Farm field (the "sub-building" plot attached to every farm). Shared by the
+// sim (work-spot positions) and the render layer (field visual).
+static constexpr float FarmFieldOffset   = 380.f;   // field centre, +X from the farm
+static constexpr float FarmFieldHalfSize = 220.f;   // square half-extent
 
 // --- Sim data: plain structs, trivially copyable, NO UObjects ---
 struct FAgent
@@ -65,10 +73,15 @@ struct FAgent
 	float       Speed         = 200.f;
 	EAgentState State         = EAgentState::Idle;
 	EJobKind    Job           = EJobKind::None;
+
+	// Workforce: the resource building this villager is assigned to (player
+	// decision, sticky until unassigned). Unassigned villagers stay idle.
+	FBuildingId AssignedBuilding = INVALID_ID;
+
 	FBuildingId PickupFrom    = INVALID_ID;  // hauling: source building
 	FBuildingId DeliverTo     = INVALID_ID;  // hauling: destination building
 	FTreeId     TargetTree    = INVALID_ID;  // tree being walked to / chopped
-	float       WorkTimer     = 0.f;         // chopping progress while Working
+	float       WorkTimer     = 0.f;         // progress while Working
 	int32       CarriedAmount = 0;
 	EResource   CarriedType   = EResource::None;
 
@@ -84,11 +97,11 @@ struct FBuilding
 	FVector       Position = FVector::ZeroVector;
 
 	// Per-resource inventory, indexed by EResource. The warehouse uses it as
-	// the settlement stockpile; producers use their own slots as input (sawmill
-	// logs) and output (sawmill planks, farm food) buffers.
+	// the settlement stockpile; the sawmill as input (logs) / output (planks).
 	int32 Stored[NumResources] = {};
 
-	float WorkTimer = 0.f;   // production progress (sawmill/farm)
+	float WorkTimer       = 0.f;   // production progress (planks,steel,etc)
+	int32 AssignedWorkers = 0;     // mirror of agents assigned here
 
 	// Hauling claims: one hauler at a time per direction keeps agents from
 	// dog-piling the same errand (released on pickup/delivery/death).
@@ -96,7 +109,7 @@ struct FBuilding
 	bool bOutputClaimed = false;
 };
 
-// Phase 1 "tree": minimal resource node — a target position and a yield.
+// "Tree": minimal resource node — a target position and a yield.
 struct FTree
 {
 	FVector Position  = FVector::ZeroVector;
@@ -122,6 +135,10 @@ struct FAgentSnapshot
 	UPROPERTY(BlueprintReadOnly, Category = "Sim")
 	EResource CarriedType = EResource::None;
 
+	// Assigned to a resource building (unassigned idle = "unemployed").
+	UPROPERTY(BlueprintReadOnly, Category = "Sim")
+	bool bAssigned = false;
+
 	// True while the agent is overdue for a meal the warehouse couldn't provide.
 	UPROPERTY(BlueprintReadOnly, Category = "Sim")
 	bool bStarving = false;
@@ -131,8 +148,10 @@ struct FAgentSnapshot
 // without touching sim data directly (hard rule #2).
 struct FBuildingSnapshot
 {
-	FVector       Position = FVector::ZeroVector;
-	EBuildingType Type     = EBuildingType::None;
+	FVector       Position        = FVector::ZeroVector;
+	EBuildingType Type            = EBuildingType::None;
+	int32         AssignedWorkers = 0;
+	int32         MaxWorkers      = 0;
 };
 
 struct FTreeSnapshot
@@ -150,11 +169,12 @@ struct FSimSnapshot
 	TArray<FTreeSnapshot>     Trees;
 
 	// Settlement totals (summed over Warehouse buildings) + population, for the UI.
-	int32 LogCount   = 0;
-	int32 PlankCount = 0;
-	int32 FoodCount  = 0;
-	int32 Population = 0;     // alive agents
-	bool  bGameOver  = false; // everyone starved
+	int32 LogCount      = 0;
+	int32 PlankCount    = 0;
+	int32 FoodCount     = 0;
+	int32 Population    = 0;   // alive agents
+	int32 IdleVillagers = 0;   // alive, not assigned to any building
+	bool  bGameOver     = false;
 
 	int64 TickNumber = 0;
 };

@@ -71,13 +71,18 @@ void AAgentVisual::UpdateVisual(const FAgentSnapshot& Snap, const FVector& Camer
 	FLinearColor Color;
 	switch (Snap.State)
 	{
-	case EAgentState::MovingToWork:    StateText = TEXT("walking to tree"); Color = FLinearColor(1.f, 0.85f, 0.1f);  break;
-	case EAgentState::Working:         StateText = TEXT("chopping");        Color = FLinearColor(0.9f, 0.3f, 0.1f);  break;
+	// Generic labels: the same states serve every gathering job (trees today,
+	// fields, stone, iron later).
+	case EAgentState::MovingToWork:    StateText = TEXT("walking to workplace"); Color = FLinearColor(1.f, 0.85f, 0.1f); break;
+	case EAgentState::Working:         StateText = TEXT("working");             Color = FLinearColor(0.9f, 0.3f, 0.1f); break;
 	case EAgentState::MovingToStore:   StateText = TEXT("returning");       Color = FLinearColor(0.2f, 0.8f, 0.3f);  break;
 	case EAgentState::MovingToPickup:  StateText = TEXT("fetching");        Color = FLinearColor(0.3f, 0.6f, 0.9f);  break;
 	case EAgentState::MovingToDeliver: StateText = TEXT("hauling");         Color = FLinearColor(0.2f, 0.45f, 0.95f); break;
 	case EAgentState::Idle:
-	default:                           StateText = TEXT("idle");            Color = FLinearColor(0.6f, 0.6f, 0.6f);  break;
+	default:
+		StateText = Snap.bAssigned ? TEXT("idle") : TEXT("unemployed");
+		Color = Snap.bAssigned ? FLinearColor(0.6f, 0.6f, 0.6f) : FLinearColor(0.75f, 0.75f, 0.5f);
+		break;
 	}
 
 	if (Snap.CarriedAmount > 0)
