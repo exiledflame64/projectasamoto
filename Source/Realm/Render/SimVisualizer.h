@@ -13,7 +13,8 @@
 
 class AAgentVisual;
 class AStaticMeshActor;
-class UStaticMesh;
+class URealmVisualSet;
+struct FRealmMeshDef;
 
 UCLASS()
 class REALM_API ASimVisualizer : public AActor
@@ -45,18 +46,11 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<AStaticMeshActor>> TreeVisuals;
 
+	// All appearance comes from the shared visual set (asset or C++ defaults).
 	UPROPERTY()
-	TObjectPtr<UStaticMesh> CubeMesh;
+	TObjectPtr<const URealmVisualSet> VisualSet;
 
-	UPROPERTY()
-	TObjectPtr<UStaticMesh> CylinderMesh;
-
-	UPROPERTY()
-	TObjectPtr<UMaterialInterface> ShapeMaterial;
-
-	AStaticMeshActor* SpawnShape(UStaticMesh* Mesh, const FVector& Scale,
-		const FLinearColor& Color);
-	AStaticMeshActor* SpawnFieldPlot();
+	AStaticMeshActor* SpawnVisual(const FRealmMeshDef& Def);
 	FVector GetCameraLocation() const;
 	void PruneTo(int32 Count, TArray<TObjectPtr<AStaticMeshActor>>& Visuals,
 		TArray<EBuildingType>* Types);

@@ -2,43 +2,15 @@
 
 #include "SimVisualizer.h"
 #include "AgentVisual.h"
+#include "RealmVisualSet.h"
 #include "Core/SimSubsystem.h"
 
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
-
-namespace
-{
-	// Basic cube/cylinder meshes are 100 cm tall and centred on the origin, so a
-	// shape sits on the ground when lifted by half its scaled height.
-	float GroundLift(const AActor* A) { return 50.f * A->GetActorScale3D().Z; }
-
-	struct FBuildingLook
-	{
-		FVector      Scale;
-		FLinearColor Color;
-	};
-
-	FBuildingLook LookFor(EBuildingType Type)
-	{
-		switch (Type)
-		{
-		case EBuildingType::Warehouse:  return { FVector(2.5f, 2.5f, 2.0f), FLinearColor(0.15f, 0.4f, 0.9f)  };
-		case EBuildingType::Sawmill:    return { FVector(2.2f, 2.2f, 1.8f), FLinearColor(0.85f, 0.45f, 0.1f) };
-		case EBuildingType::Farm:       return { FVector(2.4f, 2.4f, 1.2f), FLinearColor(0.55f, 0.7f, 0.15f) };
-		case EBuildingType::House:      return { FVector(1.5f, 1.5f, 1.2f), FLinearColor(0.85f, 0.8f, 0.7f)  };
-		case EBuildingType::Lumberyard:
-		default:                        return { FVector(2.0f, 2.0f, 1.5f), FLinearColor(0.5f, 0.3f, 0.12f)  };
-		}
-	}
-}
 
 ASimVisualizer::ASimVisualizer()
 {
@@ -48,17 +20,12 @@ ASimVisualizer::ASimVisualizer()
 void ASimVisualizer::BeginPlay()
 {
 	Super::BeginPlay();
-
-	CubeMesh      = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	CylinderMesh  = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	ShapeMaterial = LoadObject<UMaterialInterface>(nullptr,
-		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	VisualSet = URealmVisualSet::Resolve();
 }
 
-AStaticMeshActor* ASimVisualizer::SpawnShape(UStaticMesh* Mesh, const FVector& Scale,
-	const FLinearColor& Color)
+AStaticMeshActor* ASimVisualizer::SpawnVisual(const FRealmMeshDef& Def)
 {
-	if (!Mesh || !GetWorld())
+	if (!GetWorld())
 	{
 		return nullptr;
 	}
@@ -75,18 +42,8 @@ AStaticMeshActor* ASimVisualizer::SpawnShape(UStaticMesh* Mesh, const FVector& S
 
 	UStaticMeshComponent* Comp = Actor->GetStaticMeshComponent();
 	Comp->SetMobility(EComponentMobility::Movable);
-	Comp->SetStaticMesh(Mesh);
 	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Actor->SetActorScale3D(Scale);
-
-	// Tint via a dynamic instance of BasicShapeMaterial (has a "Color" param).
-	UMaterialInterface* Base = ShapeMaterial ? ShapeMaterial.Get() : Comp->GetMaterial(0);
-	if (Base)
-	{
-		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this);
-		MID->SetVectorParameterValue(TEXT("Color"), Color);
-		Comp->SetMaterial(0, MID);
-	}
+	Def.ApplyTo(Comp, this);
 	return Actor;
 }
 
@@ -108,7 +65,7 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 
 	const UGameInstance* GI = GetGameInstance();
 	const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
-	if (!Sub)
+	if (!Sub || !VisualSet)
 	{
 		return;
 	}
@@ -116,10 +73,11 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 	const FSimSnapshot& Snap = Sub->GetSnapshot();
 	const FVector CamLoc = GetCameraLocation();
 
-	// --- Buildings (tinted cubes per type) ---
+	// --- Buildings ---
 	for (int32 i = 0; i < Snap.Buildings.Num(); ++i)
 	{
 		const EBuildingType Type = Snap.Buildings[i].Type;
+		const FRealmMeshDef& Def = VisualSet->BuildingDef(Type);
 
 		// Respawn when the type at this index changed (happens after a load).
 		if (BuildingVisuals.IsValidIndex(i) && BuildingVisualTypes[i] != Type)
@@ -133,49 +91,54 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 				FieldVisuals[i]->Destroy();
 				FieldVisuals[i] = nullptr;
 			}
-			const FBuildingLook Look = LookFor(Type);
-			BuildingVisuals[i]      = SpawnShape(CubeMesh, Look.Scale, Look.Color);
-			BuildingVisualTypes[i]  = Type;
+			BuildingVisuals[i]     = SpawnVisual(Def);
+			BuildingVisualTypes[i] = Type;
 			if (Type == EBuildingType::Farm)
 			{
-				FieldVisuals[i] = SpawnFieldPlot();
+				FieldVisuals[i] = SpawnVisual(VisualSet->FieldPlot);
 			}
 		}
 		if (i >= BuildingVisuals.Num())
 		{
-			const FBuildingLook Look = LookFor(Type);
-			BuildingVisuals.Add(SpawnShape(CubeMesh, Look.Scale, Look.Color));
+			BuildingVisuals.Add(SpawnVisual(Def));
 			BuildingVisualTypes.Add(Type);
-			FieldVisuals.Add(Type == EBuildingType::Farm ? SpawnFieldPlot() : nullptr);
+			FieldVisuals.Add(Type == EBuildingType::Farm
+				? SpawnVisual(VisualSet->FieldPlot) : nullptr);
 		}
 		if (AStaticMeshActor* A = BuildingVisuals[i])
 		{
-			A->SetActorLocation(Snap.Buildings[i].Position + FVector(0.f, 0.f, GroundLift(A)));
+			// Seeds may carry a per-instance scale; zero means the def's own.
+			const FVector EffScale = Def.EffectiveScale(Snap.Buildings[i].VisualScale);
+			A->SetActorScale3D(EffScale);
+			A->SetActorLocation(Snap.Buildings[i].Position
+				+ FVector(0.f, 0.f, Def.GroundLiftFor(EffScale)));
 		}
 		// Field plot (the farm's sub-building) sits beside the farm.
 		if (FieldVisuals.IsValidIndex(i) && FieldVisuals[i])
 		{
-			FieldVisuals[i]->SetActorLocation(
-				Snap.Buildings[i].Position + FVector(FarmFieldOffset, 0.f, 1.f));
+			FieldVisuals[i]->SetActorLocation(Snap.Buildings[i].Position
+				+ FVector(FarmFieldOffset, 0.f, VisualSet->FieldPlot.GroundLift() + 1.f));
 		}
 	}
 
-	// --- Trees (green cylinder; hidden once chopped out) ---
+	// --- Trees (hidden once chopped out or built over) ---
 	for (int32 i = 0; i < Snap.Trees.Num(); ++i)
 	{
 		if (i >= TreeVisuals.Num())
 		{
-			TreeVisuals.Add(SpawnShape(CylinderMesh,
-				FVector(0.6f, 0.6f, 3.0f), FLinearColor(0.1f, 0.55f, 0.15f)));
+			TreeVisuals.Add(SpawnVisual(VisualSet->Tree));
 		}
 		if (AStaticMeshActor* A = TreeVisuals[i])
 		{
-			A->SetActorLocation(Snap.Trees[i].Position + FVector(0.f, 0.f, GroundLift(A)));
+			const FVector EffScale = VisualSet->Tree.EffectiveScale(Snap.Trees[i].VisualScale);
+			A->SetActorScale3D(EffScale);
+			A->SetActorLocation(Snap.Trees[i].Position
+				+ FVector(0.f, 0.f, VisualSet->Tree.GroundLiftFor(EffScale)));
 			A->SetActorHiddenInGame(Snap.Trees[i].Remaining <= 0);
 		}
 	}
 
-	// --- Agents (cube villager + state label) ---
+	// --- Agents (villager + state label) ---
 	for (int32 i = 0; i < Snap.Agents.Num(); ++i)
 	{
 		if (i >= AgentVisuals.Num())
@@ -210,15 +173,6 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 		}
 		AgentVisuals.Pop();
 	}
-}
-
-// Flat tilled-earth plot marking the farm's attached field (where its workers
-// tend). Footprint matches the sim's work-spot area.
-AStaticMeshActor* ASimVisualizer::SpawnFieldPlot()
-{
-	const float PlotScale = (FarmFieldHalfSize * 2.f) / 100.f;   // cube is 100 uu
-	return SpawnShape(CubeMesh, FVector(PlotScale, PlotScale, 0.04f),
-		FLinearColor(0.45f, 0.33f, 0.16f));
 }
 
 void ASimVisualizer::PruneTo(int32 Count, TArray<TObjectPtr<AStaticMeshActor>>& Visuals,

@@ -579,7 +579,8 @@ bool FSimWorld::CanPlaceBuilding(EBuildingType Type, const FVector& Pos) const
 	return true;
 }
 
-FBuildingId FSimWorld::PlaceBuilding(EBuildingType Type, const FVector& Pos)
+FBuildingId FSimWorld::PlaceBuilding(EBuildingType Type, const FVector& Pos,
+	const FVector& VisualScale)
 {
 	if (!CanPlaceBuilding(Type, Pos))
 	{
@@ -616,8 +617,9 @@ FBuildingId FSimWorld::PlaceBuilding(EBuildingType Type, const FVector& Pos)
 	}
 
 	FBuilding B;
-	B.Type     = Type;
-	B.Position = Pos;
+	B.Type        = Type;
+	B.Position    = Pos;
+	B.VisualScale = VisualScale;
 	return Buildings.Add(B);
 }
 
@@ -629,10 +631,11 @@ FAgentId FSimWorld::SpawnAgent(const FVector& Pos)
 	return Agents.Add(A);
 }
 
-FTreeId FSimWorld::SpawnTree(const FVector& Pos)
+FTreeId FSimWorld::SpawnTree(const FVector& Pos, const FVector& VisualScale)
 {
 	FTree T;
-	T.Position = Pos;
+	T.Position    = Pos;
+	T.VisualScale = VisualScale;
 	return Trees.Add(T);
 }
 
@@ -753,7 +756,8 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 	Out.LogCount = Out.PlankCount = Out.FoodCount = 0;
 	for (const FBuilding& B : Buildings)
 	{
-		Out.Buildings.Add({ B.Position, B.Type, B.AssignedWorkers, MaxWorkersFor(B.Type) });
+		Out.Buildings.Add({ B.Position, B.Type, B.AssignedWorkers, MaxWorkersFor(B.Type),
+			B.VisualScale });
 		if (B.Type == EBuildingType::Warehouse)
 		{
 			Out.LogCount   += B.Stored[ResIdx(EResource::Log)];
@@ -765,7 +769,7 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 	Out.Trees.Reset(Trees.Num());
 	for (const FTree& T : Trees)
 	{
-		Out.Trees.Add({ T.Position, T.Remaining });
+		Out.Trees.Add({ T.Position, T.Remaining, T.VisualScale });
 	}
 
 	Out.bGameOver  = bGameOver;
@@ -776,12 +780,12 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 
 void FSimWorld::Serialize(FArchive& Ar)
 {
-	int32 Version = 4;   // v4: workforce assignment (FAgent/FBuilding layout changed)
+	int32 Version = 5;   // v5: per-instance visual scale (FTree/FBuilding layout changed)
 	Ar << Version;
-	if (Ar.IsLoading() && Version != 4)
+	if (Ar.IsLoading() && Version != 5)
 	{
 		UE_LOG(LogTemp, Warning,
-			TEXT("[RealmSave] Sim save version %d unsupported (want 4); load skipped."), Version);
+			TEXT("[RealmSave] Sim save version %d unsupported (want 5); load skipped."), Version);
 		return;
 	}
 

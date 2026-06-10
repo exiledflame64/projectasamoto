@@ -96,6 +96,10 @@ struct FBuilding
 	EBuildingType Type     = EBuildingType::None;
 	FVector       Position = FVector::ZeroVector;
 
+	// Cosmetic only — carried from editor-scaled seeds to the render proxy.
+	// Zero means "use the visual set's default scale". Sim logic ignores it.
+	FVector VisualScale = FVector::ZeroVector;
+
 	// Per-resource inventory, indexed by EResource. The warehouse uses it as
 	// the settlement stockpile; the sawmill as input (logs) / output (planks).
 	int32 Stored[NumResources] = {};
@@ -115,6 +119,9 @@ struct FTree
 	FVector Position  = FVector::ZeroVector;
 	int32   Remaining = 5;       // logs left to chop
 	bool    bClaimed  = false;   // an agent is walking to / chopping this
+
+	// Cosmetic only (see FBuilding::VisualScale).
+	FVector VisualScale = FVector::ZeroVector;
 };
 
 // --- Render snapshot: what the visual layer is allowed to read ---
@@ -152,12 +159,14 @@ struct FBuildingSnapshot
 	EBuildingType Type            = EBuildingType::None;
 	int32         AssignedWorkers = 0;
 	int32         MaxWorkers      = 0;
+	FVector       VisualScale     = FVector::ZeroVector;   // zero = visual set default
 };
 
 struct FTreeSnapshot
 {
-	FVector Position  = FVector::ZeroVector;
-	int32   Remaining = 0;
+	FVector Position    = FVector::ZeroVector;
+	int32   Remaining   = 0;
+	FVector VisualScale = FVector::ZeroVector;   // zero = visual set default
 };
 
 // Render-side, read-only copy of sim state for one frame. Plain struct (copied

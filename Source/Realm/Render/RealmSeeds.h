@@ -36,9 +36,15 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;   // preview from the visual set
 
 	UPROPERTY(VisibleAnywhere, Category = "Realm")
 	TObjectPtr<UStaticMeshComponent> Mesh;
+
+	// Set after the visual set's scale is applied as the initial default, so
+	// later per-instance scale edits in the editor are respected.
+	UPROPERTY()
+	bool bScaleInitialized = false;
 };
 
 // A pre-built building. Optionally pre-stocked with food (warehouse) and/or
@@ -67,4 +73,7 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Realm")
 	TObjectPtr<UStaticMeshComponent> Mesh;
+
+	UPROPERTY()
+	bool bScaleInitialized = false;
 };

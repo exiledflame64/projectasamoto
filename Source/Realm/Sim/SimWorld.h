@@ -18,10 +18,14 @@ public:
 	// game thread for now; queue them if/when commands come off-thread).
 	// PlaceBuilding refuses invalid spots (returns INVALID_ID). Validation is
 	// footprint-aware: a farm also occupies its attached field plot.
+	// VisualScale is cosmetic passthrough for the render proxy (zero = visual
+	// set default); editor-scaled seeds feed it.
 	bool        CanPlaceBuilding(EBuildingType Type, const FVector& Pos) const;
-	FBuildingId PlaceBuilding(EBuildingType Type, const FVector& Pos);
+	FBuildingId PlaceBuilding(EBuildingType Type, const FVector& Pos,
+		const FVector& VisualScale = FVector::ZeroVector);
 	FAgentId    SpawnAgent(const FVector& Pos);
-	FTreeId     SpawnTree(const FVector& Pos);
+	FTreeId     SpawnTree(const FVector& Pos,
+		const FVector& VisualScale = FVector::ZeroVector);
 	void        AddResource(FBuildingId Building, EResource Resource, int32 Amount);
 
 	// Workforce: a villager works exactly one resource building, sticky until

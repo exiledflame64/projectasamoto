@@ -1,43 +1,29 @@
 // Copyright Asamoto.
 
 #include "AgentVisual.h"
+#include "RealmVisualSet.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "UObject/ConstructorHelpers.h"
 
 AAgentVisual::AAgentVisual()
 {
 	PrimaryActorTick.bCanEverTick = false;   // the visualizer drives updates
 
+	// Root scene component keeps the actor origin on the sim ground position;
+	// the mesh hangs off it with whatever the visual set prescribes.
+	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
+	RootComponent = SceneRoot;
+
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
-	RootComponent = Mesh;
+	Mesh->SetupAttachment(SceneRoot);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	// Villager ~50x50x100 cm. Basic cube is 100 cm; lift it half a unit so it
-	// sits on the ground while the actor origin stays on the sim ground position.
-	Mesh->SetRelativeScale3D(FVector(0.5f, 0.5f, 1.0f));
-	Mesh->SetRelativeLocation(FVector(0.f, 0.f, 50.f));
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
-		TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeFinder.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeFinder.Object);
-	}
-
-	// BasicShapeMaterial exposes a "Color" vector param (the default cube material
-	// does not), so base the tintable dynamic material on it.
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MatFinder(
-		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (MatFinder.Succeeded())
-	{
-		Mesh->SetMaterial(0, MatFinder.Object);
-	}
 
 	Label = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Label"));
-	Label->SetupAttachment(Mesh);
+	Label->SetupAttachment(SceneRoot);
 	Label->SetRelativeLocation(FVector(0.f, 0.f, 160.f));
 	Label->SetHorizontalAlignment(EHTA_Center);
 	Label->SetWorldSize(40.f);
@@ -49,10 +35,18 @@ void AAgentVisual::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (UMaterialInterface* Base = Mesh->GetMaterial(0))
+	// Appearance from the shared visual set (asset or C++ defaults).
+	const URealmVisualSet* Set = URealmVisualSet::Resolve();
+	const FRealmMeshDef& Def = Set->Villager;
+	Def.ApplyTo(Mesh, this);
+	Mesh->SetRelativeLocation(FVector(0.f, 0.f, Def.GroundLift()));
+	MeshMID = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0));
+
+	// Label floats just above whatever mesh the set prescribes.
+	if (const UStaticMesh* SM = Mesh->GetStaticMesh())
 	{
-		MeshMID = UMaterialInstanceDynamic::Create(Base, this);
-		Mesh->SetMaterial(0, MeshMID);
+		const float TopZ = Def.GroundLift() + SM->GetBoundingBox().Max.Z * Def.Scale.Z;
+		Label->SetRelativeLocation(FVector(0.f, 0.f, TopZ + 60.f));
 	}
 }
 
