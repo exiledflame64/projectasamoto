@@ -16,6 +16,8 @@ public:
 
 	// Commands issued from the render/UI side (applied immediately on the
 	// game thread for now; queue them if/when commands come off-thread).
+	// PlaceBuilding refuses invalid spots (returns INVALID_ID).
+	bool        CanPlaceBuilding(const FVector& Pos) const;
 	FBuildingId PlaceBuilding(EBuildingType Type, const FVector& Pos);
 	FAgentId    SpawnAgent(const FVector& Pos);
 	FTreeId     SpawnTree(const FVector& Pos);

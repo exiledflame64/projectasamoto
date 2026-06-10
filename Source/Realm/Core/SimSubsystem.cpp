@@ -18,6 +18,14 @@ bool USimSubsystem::IsTickable() const
 
 void USimSubsystem::Tick(float DeltaTime)
 {
+	// Real-time with pause (settled decision, baoding.md): a paused sim accrues
+	// no time at all — render/UI keep running off the last snapshot.
+	if (bSimPaused)
+	{
+		PublishSnapshot();
+		return;
+	}
+
 	Accumulator += DeltaTime;
 	// Clamp to avoid a spiral-of-death after a long hitch.
 	Accumulator = FMath::Min(Accumulator, 0.5f);

@@ -30,10 +30,15 @@ public:
 	// Render/UI reads this (call on the game thread).
 	const FSimSnapshot& GetSnapshot() const { return Snapshots[ReadIndex.load()]; }
 
-	FSimWorld& GetSim() { return Sim; }
+	FSimWorld&       GetSim()       { return Sim; }
+	const FSimWorld& GetSim() const { return Sim; }
+
+	bool IsSimPaused() const { return bSimPaused; }
+	void SetSimPaused(bool bPaused) { bSimPaused = bPaused; }
 
 private:
 	FSimWorld Sim;
+	bool bSimPaused = false;
 
 	static constexpr float FixedDt = 0.1f;   // 10 Hz
 	float Accumulator = 0.f;

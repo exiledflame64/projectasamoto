@@ -26,6 +26,7 @@ void SBlueprintBar::Construct(const FArguments& InArgs)
 		.Padding(4.f, 0.f)
 		[
 			SNew(SButton)
+			.ToolTipText(Def.Tooltip)
 			.IsEnabled(TAttribute<bool>::CreateLambda([this, Kind] { return IsEntryEnabled(Kind); }))
 			.ButtonColorAndOpacity(TAttribute<FSlateColor>::CreateLambda([this, Kind]() -> FSlateColor
 			{
@@ -60,12 +61,37 @@ void SBlueprintBar::Construct(const FArguments& InArgs)
 	.VAlign(VAlign_Bottom)
 	.Padding(FMargin(0.f, 0.f, 0.f, 24.f))
 	[
-		SNew(SBorder)
-		.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
-		.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.6f))
-		.Padding(8.f)
+		SNew(SVerticalBox)
+
+		// Placement hint, shown only while a blueprint is armed.
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.HAlign(HAlign_Center)
+		.Padding(0.f, 0.f, 0.f, 6.f)
 		[
-			Row
+			SNew(STextBlock)
+			.Visibility(TAttribute<EVisibility>::CreateLambda([this]
+			{
+				return Selected != EBlueprintKind::None
+					? EVisibility::HitTestInvisible : EVisibility::Collapsed;
+			}))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 11))
+			.ColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.85f))
+			.ShadowOffset(FVector2D(1.f, 1.f))
+			.Text(NSLOCTEXT("Realm", "PlaceHint",
+				"Left-click the ground to place — click the blueprint again to cancel"))
+		]
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+			.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.6f))
+			.Padding(8.f)
+			[
+				Row
+			]
 		]
 	];
 }

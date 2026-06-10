@@ -18,6 +18,7 @@ namespace
 
 	float StarvingMult(const FAgent& A) { return A.StarveTimer > 0.f ? StarvingSpeedFactor : 1.f; }
 	constexpr float ArrivalTolerance = 2.0f;   // cm; movement snaps to target on arrival
+	constexpr float MinBuildingSpacing = 320.f; // cm between building centres (biggest cube is 250 wide)
 
 	constexpr int32 ResIdx(EResource R) { return static_cast<int32>(R); }
 }
@@ -455,8 +456,24 @@ void FSimWorld::KillAgent(FAgent& A)
 
 // --- Commands ---
 
+bool FSimWorld::CanPlaceBuilding(const FVector& Pos) const
+{
+	for (const FBuilding& B : Buildings)
+	{
+		if (FVector::DistSquared2D(Pos, B.Position) < MinBuildingSpacing * MinBuildingSpacing)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 FBuildingId FSimWorld::PlaceBuilding(EBuildingType Type, const FVector& Pos)
 {
+	if (!CanPlaceBuilding(Pos))
+	{
+		return INVALID_ID;   // sim validates commands; the UI ghost mirrors this
+	}
 	FBuilding B;
 	B.Type     = Type;
 	B.Position = Pos;

@@ -22,6 +22,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
+	virtual void Tick(float DeltaSeconds) override;   // placement ghost preview
 
 	// Villagers spawned automatically beside each placed building. Phase 2 runs
 	// a multi-villager economy, so each building brings a small crew.
@@ -30,7 +31,9 @@ protected:
 
 private:
 	void OnPlaceBuilding();
+	void OnTogglePause();
 	void HandleBlueprintClicked(EBlueprintKind Kind);
+	bool TraceCursorToGround(FVector& OutLoc) const;
 
 	TSharedPtr<SBlueprintBar> BlueprintBar;
 	TSharedPtr<SResourcePanel> ResourcePanel;

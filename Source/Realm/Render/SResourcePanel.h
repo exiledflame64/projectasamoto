@@ -14,6 +14,7 @@ public:
 	SLATE_BEGIN_ARGS(SResourcePanel) {}
 		SLATE_ATTRIBUTE(FText, ResourceText)
 		SLATE_ATTRIBUTE(EVisibility, GameOverVisibility)
+		SLATE_ATTRIBUTE(EVisibility, PausedVisibility)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);

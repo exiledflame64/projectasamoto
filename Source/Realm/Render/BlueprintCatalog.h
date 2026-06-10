@@ -23,6 +23,7 @@ struct FBlueprintDef
 	EBlueprintKind Kind = EBlueprintKind::None;
 	EBuildingType  BuildingType = EBuildingType::None;   // what placement spawns
 	FText          DisplayName;
+	FText          Tooltip;
 	bool           bAvailable = false;   // false = "coming soon", greyed out in UI
 };
 

@@ -33,6 +33,25 @@ void SResourcePanel::Construct(const FArguments& InArgs)
 			]
 		]
 
+		// Pause indicator, top-center.
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Center)
+		.VAlign(VAlign_Top)
+		.Padding(0.f, 16.f)
+		[
+			SNew(SBorder)
+			.Visibility(InArgs._PausedVisibility)
+			.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+			.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.6f))
+			.Padding(FMargin(16.f, 8.f))
+			[
+				SNew(STextBlock)
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+				.ColorAndOpacity(FLinearColor(1.f, 0.85f, 0.2f))
+				.Text(NSLOCTEXT("Realm", "Paused", "PAUSED  (Space)"))
+			]
+		]
+
 		// Game-over banner, centered.
 		+ SOverlay::Slot()
 		.HAlign(HAlign_Center)

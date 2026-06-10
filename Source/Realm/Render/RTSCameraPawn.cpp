@@ -237,9 +237,21 @@ void ARTSCameraPawn::ApplyZoom(float DeltaSeconds)
 {
 	if (!FMath::IsNearlyZero(PendingZoom))
 	{
+		const float OldTarget = TargetArmLength;
 		TargetArmLength = FMath::Clamp(
 			TargetArmLength - PendingZoom * ZoomStep,
 			MinArmLength, MaxArmLength);
+
+		// Zoom toward the cursor: slide the rig so the ground point under the
+		// mouse holds (approximately) still on screen, RTS-style. Zooming out
+		// inverts the fraction and backs away from that point symmetrically.
+		FVector Anchor;
+		if (TargetArmLength != OldTarget && DeprojectCursorToGround(Anchor))
+		{
+			const float Frac = 1.f - TargetArmLength / OldTarget;
+			const FVector ToAnchor = Anchor - GetActorLocation();
+			AddActorWorldOffset(FVector(ToAnchor.X * Frac, ToAnchor.Y * Frac, 0.f));
+		}
 	}
 
 	SpringArm->TargetArmLength = FMath::FInterpTo(

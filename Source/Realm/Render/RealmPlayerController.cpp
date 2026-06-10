@@ -8,6 +8,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Framework/Application/SlateApplication.h"
+#include "DrawDebugHelpers.h"
 
 void ARealmPlayerController::BeginPlay()
 {
@@ -53,6 +54,13 @@ void ARealmPlayerController::BeginPlay()
 			{
 				const FSimSnapshot* S = GetSnapshot();
 				return (S && S->bGameOver) ? EVisibility::HitTestInvisible : EVisibility::Collapsed;
+			}))
+			.PausedVisibility(TAttribute<EVisibility>::CreateLambda([WeakGI]
+			{
+				const UGameInstance* GI = WeakGI.Get();
+				const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+				return (Sub && Sub->IsSimPaused())
+					? EVisibility::HitTestInvisible : EVisibility::Collapsed;
 			}));
 		GEngine->GameViewport->AddViewportWidgetContent(ResourcePanel.ToSharedRef(), /*ZOrder=*/11);
 	}
@@ -85,6 +93,65 @@ void ARealmPlayerController::SetupInputComponent()
 	{
 		InputComponent->BindAction("Place_Building", IE_Pressed,
 			this, &ARealmPlayerController::OnPlaceBuilding);
+		InputComponent->BindAction("Toggle_Pause", IE_Pressed,
+			this, &ARealmPlayerController::OnTogglePause);
+	}
+}
+
+void ARealmPlayerController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// Placement ghost: with a blueprint armed, show the footprint under the
+	// cursor, green when the spot is valid, red when the sim would refuse it.
+	const FBlueprintDef* Def = FindBlueprintDef(SelectedBlueprint);
+	if (!Def || !Def->bAvailable)
+	{
+		return;
+	}
+
+	FVector Loc;
+	if (!TraceCursorToGround(Loc))
+	{
+		return;
+	}
+
+	const UGameInstance* GI = GetGameInstance();
+	const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+	if (!Sub)
+	{
+		return;
+	}
+
+	// Generic footprint extent (debug-art scale; per-type sizes live render-side).
+	const FVector Half(120.f, 120.f, 80.f);
+	const FVector Center = Loc + FVector(0.f, 0.f, Half.Z);
+	const bool bValid = Sub->GetSim().CanPlaceBuilding(Loc);
+
+	const FColor Fill = bValid ? FColor(30, 200, 80, 70) : FColor(220, 45, 30, 70);
+	const FColor Line = bValid ? FColor(40, 230, 100)    : FColor(255, 60, 40);
+	DrawDebugSolidBox(GetWorld(), Center, Half, Fill);
+	DrawDebugBox(GetWorld(), Center, Half, Line);
+}
+
+bool ARealmPlayerController::TraceCursorToGround(FVector& OutLoc) const
+{
+	FHitResult Hit;
+	if (!GetHitResultUnderCursor(ECC_Visibility, /*bTraceComplex=*/false, Hit) || !Hit.bBlockingHit)
+	{
+		return false;
+	}
+	OutLoc = Hit.Location;
+	OutLoc.Z = 0.f;   // sim lives on the ground plane
+	return true;
+}
+
+void ARealmPlayerController::OnTogglePause()
+{
+	UGameInstance* GI = GetGameInstance();
+	if (USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr)
+	{
+		Sub->SetSimPaused(!Sub->IsSimPaused());
 	}
 }
 
@@ -113,8 +180,8 @@ void ARealmPlayerController::OnPlaceBuilding()
 		return;   // no blueprint armed: clicks on the ground do nothing
 	}
 
-	FHitResult Hit;
-	if (!GetHitResultUnderCursor(ECC_Visibility, /*bTraceComplex=*/false, Hit) || !Hit.bBlockingHit)
+	FVector Loc;
+	if (!TraceCursorToGround(Loc))
 	{
 		return;
 	}
@@ -126,11 +193,11 @@ void ARealmPlayerController::OnPlaceBuilding()
 		return;
 	}
 
-	FVector Loc = Hit.Location;
-	Loc.Z = 0.f;   // sim lives on the ground plane
-
 	FSimWorld& Sim = Sub->GetSim();
-	Sim.PlaceBuilding(Def->BuildingType, Loc);
+	if (Sim.PlaceBuilding(Def->BuildingType, Loc) == INVALID_ID)
+	{
+		return;   // invalid spot (ghost was red); keep the blueprint armed
+	}
 
 	// Each building brings its own villagers, spread on a ring beside it.
 	for (int32 i = 0; i < VillagersPerBuilding; ++i)
