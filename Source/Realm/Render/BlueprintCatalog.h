@@ -17,7 +17,8 @@ enum class EBlueprintKind : uint8
 	Warehouse,   // settlement stockpile; max 1 (bar greys it out once placed)
 	Lumberyard,
 	Sawmill,     // logs -> planks
-	Farm         // food source (workers tend the attached field)
+	Farm,        // food source (workers tend the attached field)
+	Road         // arms the road build tool (not a building; see Roads/)
 };
 
 struct FBlueprintDef

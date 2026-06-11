@@ -5,11 +5,17 @@
 #include "SResourcePanel.h"
 #include "SWorkerPanel.h"
 #include "Core/SimSubsystem.h"
+#include "Roads/RoadBuildTool.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Framework/Application/SlateApplication.h"
 #include "DrawDebugHelpers.h"
+
+ARealmPlayerController::ARealmPlayerController()
+{
+	RoadTool = CreateDefaultSubobject<URoadBuildToolComponent>(TEXT("RoadBuildTool"));
+}
 
 void ARealmPlayerController::BeginPlay()
 {
@@ -111,6 +117,14 @@ void ARealmPlayerController::SetupInputComponent()
 			this, &ARealmPlayerController::OnPlaceBuilding);
 		InputComponent->BindAction("Toggle_Pause", IE_Pressed,
 			this, &ARealmPlayerController::OnTogglePause);
+		InputComponent->BindAction("Road_Undo", IE_Pressed,
+			this, &ARealmPlayerController::OnRoadUndo);
+		InputComponent->BindAction("Road_Commit", IE_Pressed,
+			this, &ARealmPlayerController::OnRoadCommit);
+		InputComponent->BindAction("Road_CurveInc", IE_Pressed,
+			this, &ARealmPlayerController::OnRoadCurveInc);
+		InputComponent->BindAction("Road_CurveDec", IE_Pressed,
+			this, &ARealmPlayerController::OnRoadCurveDec);
 	}
 }
 
@@ -148,8 +162,9 @@ void ARealmPlayerController::Tick(float DeltaSeconds)
 
 	// Placement ghost: with a blueprint armed, show the footprint under the
 	// cursor, green when the spot is valid, red when the sim would refuse it.
+	// The road tool draws its own ribbon preview instead.
 	const FBlueprintDef* Def = FindBlueprintDef(SelectedBlueprint);
-	if (!Def || !Def->bAvailable)
+	if (!Def || !Def->bAvailable || SelectedBlueprint == EBlueprintKind::Road)
 	{
 		return;
 	}
@@ -211,6 +226,11 @@ void ARealmPlayerController::HandleBlueprintClicked(EBlueprintKind Kind)
 		BlueprintBar->SetSelected(SelectedBlueprint);
 	}
 
+	if (RoadTool)
+	{
+		RoadTool->SetToolActive(SelectedBlueprint == EBlueprintKind::Road);
+	}
+
 	// The clicked button took Slate focus; hand it back so the next viewport
 	// click acts immediately instead of spending itself on refocusing.
 	if (FSlateApplication::IsInitialized())
@@ -245,8 +265,55 @@ void ARealmPlayerController::HandleUnassignWorker(int32 BuildingIndex)
 	}
 }
 
+void ARealmPlayerController::OnRoadUndo()
+{
+	if (!RoadTool || !RoadTool->IsToolActive())
+	{
+		return;
+	}
+	if (!RoadTool->HandleUndo())
+	{
+		// Nothing left to pop: exit road mode entirely (disarm the blueprint).
+		HandleBlueprintClicked(EBlueprintKind::Road);
+	}
+}
+
+void ARealmPlayerController::OnRoadCommit()
+{
+	if (RoadTool && RoadTool->IsToolActive())
+	{
+		RoadTool->HandleCommit();
+	}
+}
+
+void ARealmPlayerController::OnRoadCurveInc()
+{
+	if (RoadTool && RoadTool->IsToolActive())
+	{
+		RoadTool->AdjustCurvature(+1.f);
+	}
+}
+
+void ARealmPlayerController::OnRoadCurveDec()
+{
+	if (RoadTool && RoadTool->IsToolActive())
+	{
+		RoadTool->AdjustCurvature(-1.f);
+	}
+}
+
 void ARealmPlayerController::OnPlaceBuilding()
 {
+	// Road mode: clicks append road points instead of placing a building.
+	if (SelectedBlueprint == EBlueprintKind::Road)
+	{
+		if (RoadTool)
+		{
+			RoadTool->HandleClick();
+		}
+		return;
+	}
+
 	const FBlueprintDef* Def = FindBlueprintDef(SelectedBlueprint);
 	if (!Def || !Def->bAvailable)
 	{

@@ -13,11 +13,15 @@
 class SBlueprintBar;
 class SResourcePanel;
 class SWorkerPanel;
+class URoadBuildToolComponent;
 
 UCLASS()
 class REALM_API ARealmPlayerController : public APlayerController
 {
 	GENERATED_BODY()
+
+public:
+	ARealmPlayerController();
 
 protected:
 	virtual void BeginPlay() override;
@@ -33,10 +37,19 @@ protected:
 private:
 	void OnPlaceBuilding();
 	void OnTogglePause();
+	void OnRoadUndo();
+	void OnRoadCommit();
+	void OnRoadCurveInc();
+	void OnRoadCurveDec();
 	void HandleBlueprintClicked(EBlueprintKind Kind);
 	void HandleAssignWorker(int32 BuildingIndex);
 	void HandleUnassignWorker(int32 BuildingIndex);
 	bool TraceCursorToGround(FVector& OutLoc) const;
+
+	// Road drawing state machine (Roads/RoadBuildTool.h); armed while the
+	// "Road" blueprint is selected.
+	UPROPERTY()
+	TObjectPtr<URoadBuildToolComponent> RoadTool;
 
 	TSharedPtr<SBlueprintBar> BlueprintBar;
 	TSharedPtr<SResourcePanel> ResourcePanel;

@@ -30,6 +30,12 @@ const TArray<FBlueprintDef>& GetBlueprintCatalog()
 			NSLOCTEXT("Realm", "TT_Farm",
 				"Assigned villagers tend the attached field and carry harvested food to the warehouse.\nVillagers eat 1 food every 20 s."),
 			true },
+		// Not a building: arming this hands clicks to the road build tool.
+		{ EBlueprintKind::Road,       EBuildingType::None,
+			NSLOCTEXT("Realm", "BP_Road",       "Road"),
+			NSLOCTEXT("Realm", "TT_Road",
+				"Draw a road: click to place points (snaps to existing roads),\nCtrl+wheel curves the segment, Shift snaps angles,\nright-click undoes, Enter commits."),
+			true },
 	};
 	return Catalog;
 }

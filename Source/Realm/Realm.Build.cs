@@ -19,7 +19,12 @@ public class Realm : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"InputCore"
+			"InputCore",
+			// Road system (Roads/): UDeveloperSettings tunables + dynamic-mesh
+			// ribbon components (UDynamicMeshComponent and friends).
+			"DeveloperSettings",
+			"GeometryCore",
+			"GeometryFramework"
 		});
 
 		// Slate for the in-game blueprint bar (no UMG assets; pure C++ UI).

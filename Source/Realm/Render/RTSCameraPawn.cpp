@@ -13,6 +13,7 @@
 
 #include "Core/SimSubsystem.h"
 #include "Save/RealmSaveGame.h"
+#include "Roads/RoadNetworkSubsystem.h"
 
 const FString ARTSCameraPawn::SaveSlotName = TEXT("RealmPhase0");
 
@@ -116,7 +117,17 @@ void ARTSCameraPawn::OnDragPanReleased()
 
 void ARTSCameraPawn::OnMoveForward(float Value) { MoveForwardInput = Value; }
 void ARTSCameraPawn::OnMoveRight(float Value)   { MoveRightInput = Value; }
-void ARTSCameraPawn::OnZoom(float Value)        { PendingZoom = Value; }
+void ARTSCameraPawn::OnZoom(float Value)
+{
+	// Ctrl + wheel belongs to the road tool (segment curvature) — the axis
+	// fires regardless of modifiers, so the camera must stand down here.
+	const APlayerController* PC = Cast<APlayerController>(GetController());
+	if (PC && (PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl)))
+	{
+		return;
+	}
+	PendingZoom = Value;
+}
 
 // --- Camera math ---
 void ARTSCameraPawn::ApplyPan(float DeltaSeconds)
@@ -283,10 +294,16 @@ void ARTSCameraPawn::OnSaveGame()
 	FMemoryWriter Writer(SaveObj->SimBytes);
 	SimSub->GetSim().Serialize(Writer);
 
+	// Road network graph rides along as its own blob.
+	if (URoadNetworkSubsystem* Roads = GetWorld()->GetSubsystem<URoadNetworkSubsystem>())
+	{
+		Roads->SerializeToBytes(SaveObj->RoadBytes);
+	}
+
 	const bool bOk = UGameplayStatics::SaveGameToSlot(SaveObj, SaveSlotName, SaveUserIndex);
-	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Save %s slot='%s' Tick=%d SimBytes=%d"),
+	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Save %s slot='%s' Tick=%d SimBytes=%d RoadBytes=%d"),
 		bOk ? TEXT("OK") : TEXT("FAILED"), *SaveSlotName, SaveObj->TickCount,
-		SaveObj->SimBytes.Num());
+		SaveObj->SimBytes.Num(), SaveObj->RoadBytes.Num());
 }
 
 void ARTSCameraPawn::OnLoadGame()
@@ -316,6 +333,13 @@ void ARTSCameraPawn::OnLoadGame()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Load OK slot='%s' Tick=%d SimBytes=%d"),
-		*SaveSlotName, Loaded->TickCount, Loaded->SimBytes.Num());
+	// Roads: an empty blob (pre-road save) clears the network; the renderer
+	// rebuilds/prunes from the change broadcast.
+	if (URoadNetworkSubsystem* Roads = GetWorld()->GetSubsystem<URoadNetworkSubsystem>())
+	{
+		Roads->LoadFromBytes(Loaded->RoadBytes);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[RealmSave] Load OK slot='%s' Tick=%d SimBytes=%d RoadBytes=%d"),
+		*SaveSlotName, Loaded->TickCount, Loaded->SimBytes.Num(), Loaded->RoadBytes.Num());
 }

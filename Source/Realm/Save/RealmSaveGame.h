@@ -20,4 +20,8 @@ public:
 
 	UPROPERTY()
 	TArray<uint8> SimBytes;
+
+	// Road network graph (FRoadGraph::Serialize blob, same pattern as SimBytes).
+	UPROPERTY()
+	TArray<uint8> RoadBytes;
 };

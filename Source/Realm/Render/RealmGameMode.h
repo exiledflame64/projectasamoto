@@ -34,4 +34,8 @@ private:
 	void SpawnGroundPlane();
 	void SeedSimWorld();
 	void SpawnVisualizer();
+
+	// Roads: when the RVT assets exist, the ground writes itself into
+	// RVT_Ground and samples it back (terrain stays visible in the main pass).
+	void ApplyGroundRVT(class UPrimitiveComponent* GroundComponent) const;
 };
