@@ -1,3 +1,0 @@
-1. remove drawing road on the ground (it saves everytime), it should be a separate entity like buildings, or villagers. Sure it's a mesh placed above other mesh(ground) but the idea is to make it possible to interact with the road (to implement later - improve villager speed while walking on road, attach buildings to road and vice versa, make it if road is close to the building it "sticks" to it and continues along)
-
-2. Remove  Realmvisualset? Or rework it somehow so that If mesh contains several materials it's not only 1 material. Maybe replace it with folders for "Buildings", "villagers", 
