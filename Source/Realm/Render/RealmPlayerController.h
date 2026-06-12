@@ -45,6 +45,8 @@ private:
 	void HandleBlueprintClicked(EBlueprintKind Kind);
 	void HandleAssignWorker(int32 BuildingIndex);
 	void HandleUnassignWorker(int32 BuildingIndex);
+	void HandleUpgradeHouse(int32 BuildingIndex, ETier Target);
+	void HandleDowngradeHouse(int32 BuildingIndex);
 	bool TraceCursorToGround(FVector& OutLoc) const;
 
 	// Road drawing state machine (Roads/RoadBuildTool.h); armed while the

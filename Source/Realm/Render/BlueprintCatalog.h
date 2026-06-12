@@ -18,6 +18,8 @@ enum class EBlueprintKind : uint8
 	Lumberyard,
 	Sawmill,     // logs -> planks
 	Farm,        // food source (workers tend the attached field)
+	Temple,      // monk workplace; unlocks Peasant -> Monk house upgrades
+	Dojo,        // samurai workplace; unlocks Artisan -> Samurai house upgrades
 	Road         // arms the road build tool (not a building; see Roads/)
 };
 

@@ -6,8 +6,6 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
-#include "Materials/MaterialInstanceDynamic.h"
 
 AAgentVisual::AAgentVisual()
 {
@@ -35,18 +33,28 @@ void AAgentVisual::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Appearance from the villager visual set (asset or C++ defaults).
-	const FRealmMeshDef& Def = UVillagerVisualSet::Resolve()->Villager;
+	// Appearance comes from the villager visual set (asset or C++ defaults),
+	// per tier; the first UpdateVisual applies the right def.
+	VisualSet = UVillagerVisualSet::Resolve();
+}
+
+void AAgentVisual::ApplyTierDef(ETier Tier)
+{
+	if (!VisualSet)
+	{
+		return;
+	}
+	const FRealmMeshDef& Def = VisualSet->VillagerDef(Tier);
 	Def.ApplyTo(Mesh, this);
 	Mesh->SetRelativeLocation(FVector(0.f, 0.f, Def.GroundLift()));
-	MeshMID = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0));
 
-	// Label floats just above whatever mesh the set prescribes.
+	// Label floats just above whatever mesh the tier prescribes.
 	if (const UStaticMesh* SM = Mesh->GetStaticMesh())
 	{
 		const float TopZ = Def.GroundLift() + SM->GetBoundingBox().Max.Z * Def.Scale.Z;
 		Label->SetRelativeLocation(FVector(0.f, 0.f, TopZ + 60.f));
 	}
+	AppliedTier = Tier;
 }
 
 void AAgentVisual::UpdateVisual(const FAgentSnapshot& Snap, const FVector& CameraLocation)
@@ -59,6 +67,13 @@ void AAgentVisual::UpdateVisual(const FAgentSnapshot& Snap, const FVector& Camer
 	}
 	SetActorHiddenInGame(false);
 	SetActorLocation(Snap.Position);
+
+	// Tier owns the body look (per-tier mesh def, population_todos.md §7);
+	// promotion/demotion swaps it live.
+	if (Snap.Tier != AppliedTier)
+	{
+		ApplyTierDef(Snap.Tier);
+	}
 
 	FString StateText;
 	FLinearColor Color;
@@ -95,11 +110,10 @@ void AAgentVisual::UpdateVisual(const FAgentSnapshot& Snap, const FVector& Camer
 		StateText += TEXT(" (STARVING)");
 	}
 
+	// The body shows the tier (via the def's own tint/mesh); the state color
+	// lives on the label text so both stay readable.
 	Label->SetText(FText::FromString(StateText));
-	if (MeshMID)
-	{
-		MeshMID->SetVectorParameterValue(TEXT("Color"), Color);
-	}
+	Label->SetTextRenderColor(Color.ToFColor(/*bSRGB=*/true));
 
 	// Billboard the label toward the camera so the text stays readable. Text
 	// renders along the component's +X axis, so +X must point AT the camera —

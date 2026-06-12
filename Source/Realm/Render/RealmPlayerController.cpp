@@ -80,7 +80,11 @@ void ARealmPlayerController::BeginPlay()
 		.OnAssign(SWorkerPanel::FOnWorkerChange::CreateUObject(
 			this, &ARealmPlayerController::HandleAssignWorker))
 		.OnUnassign(SWorkerPanel::FOnWorkerChange::CreateUObject(
-			this, &ARealmPlayerController::HandleUnassignWorker));
+			this, &ARealmPlayerController::HandleUnassignWorker))
+		.OnUpgradeHouse(SWorkerPanel::FOnHouseUpgrade::CreateUObject(
+			this, &ARealmPlayerController::HandleUpgradeHouse))
+		.OnDowngradeHouse(SWorkerPanel::FOnWorkerChange::CreateUObject(
+			this, &ARealmPlayerController::HandleDowngradeHouse));
 	GEngine->GameViewport->AddViewportWidgetContent(WorkerPanel.ToSharedRef(), /*ZOrder=*/12);
 
 	// TEMP intro window (left side, under the resource readout).
@@ -276,6 +280,32 @@ void ARealmPlayerController::HandleUnassignWorker(int32 BuildingIndex)
 	}
 }
 
+void ARealmPlayerController::HandleUpgradeHouse(int32 BuildingIndex, ETier Target)
+{
+	UGameInstance* GI = GetGameInstance();
+	if (USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr)
+	{
+		Sub->GetSim().UpgradeHouse(BuildingIndex, Target);
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+}
+
+void ARealmPlayerController::HandleDowngradeHouse(int32 BuildingIndex)
+{
+	UGameInstance* GI = GetGameInstance();
+	if (USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr)
+	{
+		Sub->GetSim().DowngradeHouse(BuildingIndex);
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+}
+
 void ARealmPlayerController::OnRoadUndo()
 {
 	// RMB doubles as "cancel placement": with a building blueprint armed,
@@ -360,8 +390,9 @@ void ARealmPlayerController::OnPlaceBuilding()
 	switch (Def->BuildingType)
 	{
 	case EBuildingType::House:
-		// A house brings exactly one villager, idle until assigned.
-		Sim.SpawnAgent(Loc + FVector(120.f, 0.f, 0.f));
+		// A house brings exactly one villager, idle until assigned. The home
+		// link is what gives the villager its tier (the house's ResidentTier).
+		Sim.SpawnAgent(Loc + FVector(120.f, 0.f, 0.f), Id);
 		break;
 
 	case EBuildingType::Warehouse:

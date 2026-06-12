@@ -121,7 +121,8 @@ void ABuildingSeed::BeginPlay()
 			for (int32 i = 0; i < Villagers; ++i)
 			{
 				const float Angle = (2.f * PI * i) / FMath::Max(Villagers, 1);
-				Sim.SpawnAgent(Loc + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * 120.f);
+				Sim.SpawnAgent(Loc + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * 120.f,
+					/*Home=*/Id);
 			}
 		}
 	}

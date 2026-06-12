@@ -11,7 +11,7 @@
 
 class UStaticMeshComponent;
 class UTextRenderComponent;
-class UMaterialInstanceDynamic;
+class UVillagerVisualSet;
 
 UCLASS()
 class REALM_API AAgentVisual : public AActor
@@ -36,6 +36,14 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
 	TObjectPtr<UTextRenderComponent> Label;
 
+	// Resolved once at BeginPlay; supplies the per-tier mesh defs.
 	UPROPERTY()
-	TObjectPtr<UMaterialInstanceDynamic> MeshMID;
+	TObjectPtr<const UVillagerVisualSet> VisualSet;
+
+private:
+	// (Re)apply the tier's mesh def — on first update and whenever the home
+	// house changes tier (promotion/demotion swaps the villager's look).
+	void ApplyTierDef(ETier Tier);
+
+	ETier AppliedTier = ETier::COUNT;   // COUNT = nothing applied yet
 };

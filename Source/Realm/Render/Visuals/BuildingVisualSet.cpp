@@ -32,6 +32,8 @@ UBuildingVisualSet::UBuildingVisualSet()
 	Buildings.Add(EBuildingType::Sawmill,    MakeDef(FVector(2.2f, 2.2f, 1.8f), FLinearColor(0.85f, 0.45f, 0.1f)));
 	Buildings.Add(EBuildingType::Farm,       MakeDef(FVector(2.4f, 2.4f, 1.2f), FLinearColor(0.55f, 0.7f, 0.15f)));
 	Buildings.Add(EBuildingType::House,      MakeDef(FVector(1.5f, 1.5f, 1.2f), FLinearColor(0.85f, 0.8f, 0.7f)));
+	Buildings.Add(EBuildingType::Temple,     MakeDef(FVector(2.2f, 2.2f, 2.2f), FLinearColor(0.8f, 0.2f, 0.15f)));
+	Buildings.Add(EBuildingType::Dojo,       MakeDef(FVector(2.2f, 2.2f, 1.6f), FLinearColor(0.25f, 0.25f, 0.35f)));
 }
 
 const FRealmMeshDef& UBuildingVisualSet::BuildingDef(EBuildingType Type) const
@@ -39,6 +41,12 @@ const FRealmMeshDef& UBuildingVisualSet::BuildingDef(EBuildingType Type) const
 	if (const FRealmMeshDef* Found = Buildings.Find(Type))
 	{
 		return *Found;
+	}
+	// The asset predates this building type (e.g. Temple/Dojo added after the
+	// map was saved): fall back to the C++ engine-shape defaults.
+	if (this != GetDefault<UBuildingVisualSet>())
+	{
+		return GetDefault<UBuildingVisualSet>()->BuildingDef(Type);
 	}
 	static const FRealmMeshDef Empty;
 	return Empty;

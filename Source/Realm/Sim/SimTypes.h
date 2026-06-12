@@ -35,8 +35,29 @@ enum class EBuildingType : uint8
 	Warehouse,   // settlement stockpile; villagers are fed from here. Max 1. No workers.
 	Sawmill,     // consumes logs, produces planks
 	Farm,        // workers tend the attached field, harvest food
-	House        // grants 1 villager when placed
+	House,       // grants 1 villager when placed; carries the resident tier
+	Temple,      // monk workplace (Monk / WarriorMonk only)
+	Dojo         // samurai workplace (Samurai only)
 };
+
+// --- Population tiers (Sengoku ladder; see population_todos.md) ---
+// Two ladders sharing a root: Peasant -> Artisan -> Samurai and
+// Peasant -> Monk -> WarriorMonk. The graph is a TREE (one incoming edge per
+// tier) — downgrade resolution and snapshot edge listing rely on that.
+UENUM(BlueprintType)
+enum class ETier : uint8
+{
+	Peasant     = 0,
+	Artisan     = 1,
+	Samurai     = 2,
+	Monk        = 3,
+	WarriorMonk = 4,
+
+	COUNT       UMETA(Hidden)
+};
+static constexpr int32 NumTiers = static_cast<int32>(ETier::COUNT);
+
+constexpr uint8 TierBit(ETier T) { return uint8(1) << uint8(T); }
 
 UENUM(BlueprintType)
 enum class EResource : uint8
@@ -57,8 +78,40 @@ enum class EJobKind : uint8
 	Chop,         // lumberyard: chop a tree, carry the log to the warehouse
 	WorkField,    // farm: tend a spot in the attached field, harvest food
 	HaulOutput,   // sawmill: collect finished planks, deliver to the warehouse
-	FeedSawmill   // sawmill: take a log from the warehouse, deliver to its input
+	FeedSawmill,  // sawmill: take a log from the warehouse, deliver to its input
+	Attend        // temple/dojo: walk there and "work" (no production yet)
 };
+
+// --- House tier promotion rules (data, not code) ---
+struct FResourceCost
+{
+	EResource Resource = EResource::None;
+	int32     Amount   = 0;
+};
+
+struct FHouseUpgradeRule
+{
+	ETier         From = ETier::Peasant;
+	ETier         To   = ETier::Peasant;
+	// Must EXIST anywhere in the settlement (global existence, no proximity);
+	// EBuildingType::None = no building requirement.
+	EBuildingType RequiredBuilding = EBuildingType::None;
+	FResourceCost Costs[4];   // unused entries Amount = 0
+};
+
+// Validation is a sequence of independent checks, each with its own fail
+// reason, so future requirement kinds append cleanly.
+enum class EUpgradeFail : uint8
+{
+	None,
+	NoRule,              // no edge from the house's current tier to the target
+	MissingBuilding,     // RequiredBuilding not present in the settlement
+	NotEnoughResources
+};
+
+// Tier ladder edges + costs. Tuning lives in SimWorld.cpp with the other sim
+// constants; the UI reads this for cost/requirement tooltips.
+REALM_API const TArray<FHouseUpgradeRule>& GetHouseUpgradeRules();
 
 // Farm field (the "sub-building" plot attached to every farm). Shared by the
 // sim (work-spot positions) and the render layer (field visual).
@@ -78,6 +131,10 @@ struct FAgent
 	// decision, sticky until unassigned). Unassigned villagers stay idle.
 	FBuildingId AssignedBuilding = INVALID_ID;
 
+	// The House that spawned this agent. The agent's tier is DERIVED from that
+	// house's ResidentTier (INVALID_ID falls back to Peasant).
+	FBuildingId HomeBuilding = INVALID_ID;
+
 	FBuildingId PickupFrom    = INVALID_ID;  // hauling: source building
 	FBuildingId DeliverTo     = INVALID_ID;  // hauling: destination building
 	FTreeId     TargetTree    = INVALID_ID;  // tree being walked to / chopped
@@ -95,6 +152,10 @@ struct FBuilding
 {
 	EBuildingType Type     = EBuildingType::None;
 	FVector       Position = FVector::ZeroVector;
+
+	// Population tier of the residents. Meaningful only for House; ignored
+	// otherwise (kept directly on FBuilding to preserve the flat POD layout).
+	ETier ResidentTier = ETier::Peasant;
 
 	// Cosmetic only — carried from editor-scaled seeds to the render proxy.
 	// Zero means "use the visual set's default scale". Sim logic ignores it.
@@ -149,6 +210,10 @@ struct FAgentSnapshot
 	// True while the agent is overdue for a meal the warehouse couldn't provide.
 	UPROPERTY(BlueprintReadOnly, Category = "Sim")
 	bool bStarving = false;
+
+	// Derived from the home house's ResidentTier (Peasant when homeless).
+	UPROPERTY(BlueprintReadOnly, Category = "Sim")
+	ETier Tier = ETier::Peasant;
 };
 
 // Read-only copies of buildings/trees so the render layer can mirror the world
@@ -160,6 +225,17 @@ struct FBuildingSnapshot
 	int32         AssignedWorkers = 0;
 	int32         MaxWorkers      = 0;
 	FVector       VisualScale     = FVector::ZeroVector;   // zero = visual set default
+
+	// Tier gate of this workplace (TierBit mask; 0 = takes no workers).
+	uint8 AllowedTiers = 0;
+
+	// House-only tier state for the UI. A Peasant house has TWO outgoing
+	// edges (Artisan and Monk); each carries its own fail reason.
+	ETier        ResidentTier    = ETier::Peasant;
+	int32        NumUpgradeEdges = 0;
+	ETier        UpgradeTo[2]    = { ETier::Peasant, ETier::Peasant };
+	EUpgradeFail UpgradeFail[2]  = { EUpgradeFail::NoRule, EUpgradeFail::NoRule };
+	bool         bCanDowngrade   = false;
 };
 
 struct FTreeSnapshot
@@ -183,6 +259,7 @@ struct FSimSnapshot
 	int32 FoodCount     = 0;
 	int32 Population    = 0;   // alive agents
 	int32 IdleVillagers = 0;   // alive, not assigned to any building
+	int32 IdleByTier[NumTiers] = {};   // idle pool split per tier (gates the [+] buttons)
 	bool  bGameOver     = false;
 
 	int64 TickNumber = 0;

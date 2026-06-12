@@ -23,7 +23,7 @@ public:
 	bool        CanPlaceBuilding(EBuildingType Type, const FVector& Pos) const;
 	FBuildingId PlaceBuilding(EBuildingType Type, const FVector& Pos,
 		const FVector& VisualScale = FVector::ZeroVector);
-	FAgentId    SpawnAgent(const FVector& Pos);
+	FAgentId    SpawnAgent(const FVector& Pos, FBuildingId Home = INVALID_ID);
 	FTreeId     SpawnTree(const FVector& Pos,
 		const FVector& VisualScale = FVector::ZeroVector);
 	void        AddResource(FBuildingId Building, EResource Resource, int32 Amount);
@@ -34,6 +34,20 @@ public:
 	bool AssignWorkerTo(FBuildingId Building);
 	bool UnassignWorkerFrom(FBuildingId Building);
 	static int32 MaxWorkersFor(EBuildingType Type);
+
+	// Tiers: which tiers may work a building type (TierBit mask), and an
+	// agent's tier, derived from its home house (Peasant when homeless).
+	static uint8 AllowedTiersFor(EBuildingType Type);
+	ETier GetAgentTier(FAgentId Agent) const;
+
+	// House promotion/demotion (population_todos.md §4–§6). Upgrade moves one
+	// edge up the tier tree, paying the rule's costs from warehouse stock;
+	// downgrade reverses one edge and refunds. Both sweep the house's
+	// residents out of now-ineligible workplaces. CanUpgradeHouse is
+	// side-effect-free (the UI mirrors it via the snapshot).
+	EUpgradeFail CanUpgradeHouse(FBuildingId House, const FHouseUpgradeRule& Rule) const;
+	bool UpgradeHouse(FBuildingId House, ETier Target);
+	bool DowngradeHouse(FBuildingId House);
 
 	// Produce a read-only snapshot for the renderer.
 	void BuildSnapshot(FSimSnapshot& Out) const;
@@ -67,12 +81,17 @@ private:
 	void StartChop(FAgent& A);                          // lumberyard
 	void StartFieldWork(FAgent& A, const FBuilding& Farm);
 	void StartSawmillWork(FAgent& A, FBuildingId MillId);
+	void StartAttend(FAgent& A, const FBuilding& B);    // temple/dojo: walk + "work"
 	void AbortJob(FAgent& A);          // release claims, drop carried, back to Idle
 	void FinishJob(FAgent& A);         // reset job fields back to Idle
 	void KillAgent(FAgent& A);         // starvation: release everything, mark Dead
 
 	// --- Needs ---
 	bool ConsumeFromWarehouses(EResource Resource, int32 Amount);
+
+	// --- Tiers ---
+	int32 CountStock(EResource Resource) const;   // total across warehouses
+	void  InvalidateMismatchedJobs(FBuildingId House);   // evict now-ineligible residents
 
 	// --- Queries ---
 	bool        HasBuilding(EBuildingType Type) const;

@@ -23,6 +23,10 @@ namespace
 	constexpr float FieldRadius        = 260.f;  // farm field plot (half-size 220 + margin)
 	constexpr float TreeRadius         = 40.f;   // trunk footprint for build-over checks
 
+	// Tier system tuning. Downgrade refunds this fraction of each edge's cost
+	// (full refund per current design; keep adjustable).
+	constexpr float DowngradeRefund = 1.0f;
+
 	constexpr int32 ResIdx(EResource R) { return static_cast<int32>(R); }
 
 	// Ground space a building occupies, as discs: its own footprint, plus the
@@ -43,6 +47,25 @@ namespace
 	}
 
 	float StarvingMult(const FAgent& A) { return A.StarveTimer > 0.f ? StarvingSpeedFactor : 1.f; }
+}
+
+// Tier ladder edges (a TREE: one incoming edge per tier — downgrade relies on
+// it). Costs/requirements are PLACEHOLDER tuning pending Anton's numbers
+// (population_todos.md §11); the structure is final.
+const TArray<FHouseUpgradeRule>& GetHouseUpgradeRules()
+{
+	static const TArray<FHouseUpgradeRule> Rules = {
+		{ ETier::Peasant, ETier::Artisan,     EBuildingType::None,
+			{ { EResource::Plank, 4 } } },
+		{ ETier::Artisan, ETier::Samurai,     EBuildingType::Dojo,
+			{ { EResource::Plank, 8 }, { EResource::Food, 4 } } },
+		{ ETier::Peasant, ETier::Monk,        EBuildingType::Temple,
+			{ { EResource::Plank, 2 }, { EResource::Food, 2 } } },
+		// Gate TBD (upgraded temple?); a plain Temple stands in for now.
+		{ ETier::Monk,    ETier::WarriorMonk, EBuildingType::Temple,
+			{ { EResource::Plank, 6 }, { EResource::Food, 4 } } },
+	};
+	return Rules;
 }
 
 void FSimWorld::Tick(float Dt)
@@ -135,6 +158,8 @@ void FSimWorld::Phase_JobAssignment()
 			case EBuildingType::Lumberyard: StartChop(A);                          break;
 			case EBuildingType::Farm:       StartFieldWork(A, WB);                 break;
 			case EBuildingType::Sawmill:    StartSawmillWork(A, A.AssignedBuilding); break;
+			case EBuildingType::Temple:     StartAttend(A, WB);                    break;
+			case EBuildingType::Dojo:       StartAttend(A, WB);                    break;
 			default:                                                               break;
 			}
 			break;
@@ -295,6 +320,13 @@ void FSimWorld::Phase_Production(float Dt)
 			A.CarriedAmount = FarmYield;
 			A.CarriedType   = EResource::Food;
 		}
+		else if (A.Job == EJobKind::Attend)
+		{
+			// Temple/dojo: stay "working" indefinitely — no production yet
+			// (effects are future design). Unassignment is the only way out.
+			A.WorkTimer = 0.f;
+			continue;
+		}
 		else
 		{
 			FinishJob(A);
@@ -398,6 +430,14 @@ void FSimWorld::StartFieldWork(FAgent& A, const FBuilding& Farm)
 	A.State  = EAgentState::MovingToWork;
 }
 
+// Temple/dojo minimal loop: walk to the workplace and idle-"work" there.
+void FSimWorld::StartAttend(FAgent& A, const FBuilding& B)
+{
+	A.Job    = EJobKind::Attend;
+	A.Target = B.Position;
+	A.State  = EAgentState::MovingToWork;
+}
+
 void FSimWorld::StartSawmillWork(FAgent& A, FBuildingId MillId)
 {
 	FBuilding& Mill = Buildings[MillId];
@@ -479,8 +519,39 @@ int32 FSimWorld::MaxWorkersFor(EBuildingType Type)
 	case EBuildingType::Lumberyard: return 3;
 	case EBuildingType::Sawmill:    return 2;
 	case EBuildingType::Farm:       return 3;
+	case EBuildingType::Temple:     return 2;
+	case EBuildingType::Dojo:       return 2;
 	default:                        return 0;   // warehouse/house take no workers
 	}
+}
+
+// Tier gate per building type (population_todos.md §2.4). Eligibility is
+// enforced entirely at assignment time; job loops never check tiers.
+uint8 FSimWorld::AllowedTiersFor(EBuildingType Type)
+{
+	switch (Type)
+	{
+	case EBuildingType::Lumberyard: return TierBit(ETier::Peasant);
+	case EBuildingType::Sawmill:    return TierBit(ETier::Peasant);
+	case EBuildingType::Farm:       return TierBit(ETier::Peasant);
+	case EBuildingType::Temple:     return TierBit(ETier::Monk) | TierBit(ETier::WarriorMonk);
+	case EBuildingType::Dojo:       return TierBit(ETier::Samurai);
+	default:                        return 0;
+	}
+}
+
+ETier FSimWorld::GetAgentTier(FAgentId Agent) const
+{
+	if (!Agents.IsValidIndex(Agent))
+	{
+		return ETier::Peasant;
+	}
+	const FAgent& A = Agents[Agent];
+	if (!Buildings.IsValidIndex(A.HomeBuilding))
+	{
+		return ETier::Peasant;   // homeless (e.g. pre-tier save): safety fallback
+	}
+	return Buildings[A.HomeBuilding].ResidentTier;
 }
 
 bool FSimWorld::AssignWorkerTo(FBuildingId Building)
@@ -495,16 +566,20 @@ bool FSimWorld::AssignWorkerTo(FBuildingId Building)
 		return false;
 	}
 
-	for (FAgent& A : Agents)
+	// The idle-pool search only considers villagers of an eligible tier.
+	const uint8 Allowed = AllowedTiersFor(B.Type);
+	for (int32 i = 0; i < Agents.Num(); ++i)
 	{
-		if (A.State != EAgentState::Dead && A.AssignedBuilding == INVALID_ID)
+		FAgent& A = Agents[i];
+		if (A.State != EAgentState::Dead && A.AssignedBuilding == INVALID_ID &&
+			(TierBit(GetAgentTier(i)) & Allowed) != 0)
 		{
 			A.AssignedBuilding = Building;
 			B.AssignedWorkers += 1;
 			return true;
 		}
 	}
-	return false;   // no idle villager available
+	return false;   // no idle villager of an eligible tier
 }
 
 bool FSimWorld::UnassignWorkerFrom(FBuildingId Building)
@@ -524,6 +599,145 @@ bool FSimWorld::UnassignWorkerFrom(FBuildingId Building)
 		}
 	}
 	return false;
+}
+
+// --- House tier commands ---
+
+// Side-effect-free and re-runnable: the snapshot mirrors it for button states.
+// Checks are independent, each with its own fail reason, so future
+// requirement kinds append cleanly.
+EUpgradeFail FSimWorld::CanUpgradeHouse(FBuildingId House, const FHouseUpgradeRule& Rule) const
+{
+	if (!Buildings.IsValidIndex(House) || Buildings[House].Type != EBuildingType::House ||
+		Buildings[House].ResidentTier != Rule.From)
+	{
+		return EUpgradeFail::NoRule;
+	}
+	if (Rule.RequiredBuilding != EBuildingType::None && !HasBuilding(Rule.RequiredBuilding))
+	{
+		return EUpgradeFail::MissingBuilding;
+	}
+	for (const FResourceCost& Cost : Rule.Costs)
+	{
+		if (Cost.Amount > 0 && CountStock(Cost.Resource) < Cost.Amount)
+		{
+			return EUpgradeFail::NotEnoughResources;
+		}
+	}
+	return EUpgradeFail::None;
+}
+
+bool FSimWorld::UpgradeHouse(FBuildingId House, ETier Target)
+{
+	if (!Buildings.IsValidIndex(House) || Buildings[House].Type != EBuildingType::House)
+	{
+		return false;
+	}
+
+	// Rule lookup by (From == current, To == target) rejects branch-crossing
+	// and edge-skipping by construction — upgrades move one edge at a time.
+	const FHouseUpgradeRule* Rule = nullptr;
+	for (const FHouseUpgradeRule& R : GetHouseUpgradeRules())
+	{
+		if (R.From == Buildings[House].ResidentTier && R.To == Target)
+		{
+			Rule = &R;
+			break;
+		}
+	}
+	if (!Rule || CanUpgradeHouse(House, *Rule) != EUpgradeFail::None)
+	{
+		return false;
+	}
+
+	for (const FResourceCost& Cost : Rule->Costs)
+	{
+		if (Cost.Amount > 0)
+		{
+			ConsumeFromWarehouses(Cost.Resource, Cost.Amount);
+		}
+	}
+	Buildings[House].ResidentTier = Rule->To;
+	InvalidateMismatchedJobs(House);
+	return true;
+}
+
+bool FSimWorld::DowngradeHouse(FBuildingId House)
+{
+	if (!Buildings.IsValidIndex(House) || Buildings[House].Type != EBuildingType::House ||
+		Buildings[House].ResidentTier == ETier::Peasant)
+	{
+		return false;
+	}
+
+	// The tier graph is a tree, so the rule whose To matches the current tier
+	// is unique — no per-house upgrade history needed.
+	const FHouseUpgradeRule* Rule = nullptr;
+	for (const FHouseUpgradeRule& R : GetHouseUpgradeRules())
+	{
+		if (R.To == Buildings[House].ResidentTier)
+		{
+			Rule = &R;
+			break;
+		}
+	}
+	if (!Rule)
+	{
+		return false;
+	}
+
+	// Refund into warehouse stock (lost if no warehouse stands — edge case).
+	const FBuildingId Store = FindNearestWarehouse(Buildings[House].Position);
+	if (Store != INVALID_ID)
+	{
+		for (const FResourceCost& Cost : Rule->Costs)
+		{
+			const int32 Back = FMath::FloorToInt32(Cost.Amount * DowngradeRefund);
+			if (Back > 0)
+			{
+				Buildings[Store].Stored[ResIdx(Cost.Resource)] += Back;
+			}
+		}
+	}
+
+	Buildings[House].ResidentTier = Rule->From;
+	InvalidateMismatchedJobs(House);
+	return true;
+}
+
+// After a house changes tier, its residents working a now-ineligible
+// building vacate it (same path as the [-] button: claims released, back to
+// the idle pool). Linear agent scan is fine at current scale (hundreds).
+void FSimWorld::InvalidateMismatchedJobs(FBuildingId House)
+{
+	const uint8 Bit = TierBit(Buildings[House].ResidentTier);
+	for (FAgent& A : Agents)
+	{
+		if (A.State == EAgentState::Dead || A.HomeBuilding != House)
+		{
+			continue;
+		}
+		const FBuildingId B = A.AssignedBuilding;
+		if (B != INVALID_ID && (Bit & AllowedTiersFor(Buildings[B].Type)) == 0)
+		{
+			AbortJob(A);
+			A.AssignedBuilding = INVALID_ID;
+			Buildings[B].AssignedWorkers -= 1;
+		}
+	}
+}
+
+int32 FSimWorld::CountStock(EResource Resource) const
+{
+	int32 Total = 0;
+	for (const FBuilding& B : Buildings)
+	{
+		if (B.Type == EBuildingType::Warehouse)
+		{
+			Total += B.Stored[ResIdx(Resource)];
+		}
+	}
+	return Total;
 }
 
 // --- Needs ---
@@ -623,10 +837,11 @@ FBuildingId FSimWorld::PlaceBuilding(EBuildingType Type, const FVector& Pos,
 	return Buildings.Add(B);
 }
 
-FAgentId FSimWorld::SpawnAgent(const FVector& Pos)
+FAgentId FSimWorld::SpawnAgent(const FVector& Pos, FBuildingId Home)
 {
 	FAgent A;
-	A.Position = Pos;
+	A.Position     = Pos;
+	A.HomeBuilding = Home;   // tier is derived from this house's ResidentTier
 	bEverHadAgents = true;
 	return Agents.Add(A);
 }
@@ -732,8 +947,10 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 	Out.Agents.Reset(Agents.Num());
 	Out.Population    = 0;
 	Out.IdleVillagers = 0;
-	for (const FAgent& A : Agents)
+	FMemory::Memzero(Out.IdleByTier, sizeof(Out.IdleByTier));
+	for (int32 i = 0; i < Agents.Num(); ++i)
 	{
+		const FAgent& A = Agents[i];
 		FAgentSnapshot Snap;
 		Snap.Position      = A.Position;
 		Snap.State         = A.State;
@@ -741,6 +958,7 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 		Snap.CarriedType   = A.CarriedType;
 		Snap.bAssigned     = A.AssignedBuilding != INVALID_ID;
 		Snap.bStarving     = A.StarveTimer > 0.f;
+		Snap.Tier          = GetAgentTier(i);
 		Out.Agents.Add(Snap);
 		if (A.State != EAgentState::Dead)
 		{
@@ -748,16 +966,41 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 			if (A.AssignedBuilding == INVALID_ID)
 			{
 				++Out.IdleVillagers;
+				++Out.IdleByTier[static_cast<int32>(Snap.Tier)];
 			}
 		}
 	}
 
 	Out.Buildings.Reset(Buildings.Num());
 	Out.LogCount = Out.PlankCount = Out.FoodCount = 0;
-	for (const FBuilding& B : Buildings)
+	for (int32 i = 0; i < Buildings.Num(); ++i)
 	{
-		Out.Buildings.Add({ B.Position, B.Type, B.AssignedWorkers, MaxWorkersFor(B.Type),
-			B.VisualScale });
+		const FBuilding& B = Buildings[i];
+		FBuildingSnapshot Snap;
+		Snap.Position        = B.Position;
+		Snap.Type            = B.Type;
+		Snap.AssignedWorkers = B.AssignedWorkers;
+		Snap.MaxWorkers      = MaxWorkersFor(B.Type);
+		Snap.VisualScale     = B.VisualScale;
+		Snap.AllowedTiers    = AllowedTiersFor(B.Type);
+		Snap.ResidentTier    = B.ResidentTier;
+		if (B.Type == EBuildingType::House)
+		{
+			// List the outgoing tier edges with their current fail state
+			// (a Peasant house has two: Artisan and Monk).
+			for (const FHouseUpgradeRule& Rule : GetHouseUpgradeRules())
+			{
+				if (Rule.From == B.ResidentTier &&
+					Snap.NumUpgradeEdges < (int32)UE_ARRAY_COUNT(Snap.UpgradeTo))
+				{
+					Snap.UpgradeTo[Snap.NumUpgradeEdges]   = Rule.To;
+					Snap.UpgradeFail[Snap.NumUpgradeEdges] = CanUpgradeHouse(i, Rule);
+					++Snap.NumUpgradeEdges;
+				}
+			}
+			Snap.bCanDowngrade = B.ResidentTier != ETier::Peasant;
+		}
+		Out.Buildings.Add(Snap);
 		if (B.Type == EBuildingType::Warehouse)
 		{
 			Out.LogCount   += B.Stored[ResIdx(EResource::Log)];
@@ -778,14 +1021,52 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 
 // --- Save/load ---
 
+namespace
+{
+	// v5 struct layouts, frozen for legacy load (v6 added FAgent::HomeBuilding
+	// and FBuilding::ResidentTier). Field order must match the v5 structs
+	// exactly — these are read back as raw blocks.
+	struct FAgentV5
+	{
+		FVector     Position = FVector::ZeroVector;
+		FVector     Target   = FVector::ZeroVector;
+		float       Speed    = 200.f;
+		EAgentState State    = EAgentState::Idle;
+		EJobKind    Job      = EJobKind::None;
+		FBuildingId AssignedBuilding = INVALID_ID;
+		FBuildingId PickupFrom = INVALID_ID;
+		FBuildingId DeliverTo  = INVALID_ID;
+		FTreeId     TargetTree = INVALID_ID;
+		float       WorkTimer  = 0.f;
+		int32       CarriedAmount = 0;
+		EResource   CarriedType   = EResource::None;
+		float       EatTimer    = 0.f;
+		float       StarveTimer = 0.f;
+	};
+
+	struct FBuildingV5
+	{
+		EBuildingType Type     = EBuildingType::None;
+		FVector       Position = FVector::ZeroVector;
+		FVector       VisualScale = FVector::ZeroVector;
+		int32         Stored[NumResources] = {};
+		float         WorkTimer       = 0.f;
+		int32         AssignedWorkers = 0;
+		bool          bInputClaimed   = false;
+		bool          bOutputClaimed  = false;
+	};
+}
+
 void FSimWorld::Serialize(FArchive& Ar)
 {
-	int32 Version = 5;   // v5: per-instance visual scale (FTree/FBuilding layout changed)
+	// v6: tiers (FAgent::HomeBuilding, FBuilding::ResidentTier).
+	// v5: per-instance visual scale (FTree/FBuilding layout changed).
+	int32 Version = 6;
 	Ar << Version;
-	if (Ar.IsLoading() && Version != 5)
+	if (Ar.IsLoading() && Version != 6 && Version != 5)
 	{
 		UE_LOG(LogTemp, Warning,
-			TEXT("[RealmSave] Sim save version %d unsupported (want 5); load skipped."), Version);
+			TEXT("[RealmSave] Sim save version %d unsupported (want 5-6); load skipped."), Version);
 		return;
 	}
 
@@ -816,6 +1097,48 @@ void FSimWorld::Serialize(FArchive& Ar)
 			Ar.Serialize(Arr.GetData(), Num * sizeof(*Arr.GetData()));
 		}
 	};
+
+	if (Ar.IsLoading() && Version == 5)
+	{
+		// Pre-tier save: read the frozen v5 layouts, then fill the new fields
+		// with their defaults (everyone Peasant, no home link — GetAgentTier
+		// falls back to Peasant). Old saves stay playable.
+		TArray<FAgentV5>    OldAgents;
+		TArray<FBuildingV5> OldBuildings;
+		SerializeArray(OldAgents);
+		SerializeArray(OldBuildings);
+		SerializeArray(Trees);
+
+		Agents.Reset(OldAgents.Num());
+		for (const FAgentV5& O : OldAgents)
+		{
+			FAgent A;
+			A.Position = O.Position;   A.Target = O.Target;   A.Speed = O.Speed;
+			A.State = O.State;         A.Job = O.Job;
+			A.AssignedBuilding = O.AssignedBuilding;
+			A.HomeBuilding     = INVALID_ID;
+			A.PickupFrom = O.PickupFrom;   A.DeliverTo = O.DeliverTo;
+			A.TargetTree = O.TargetTree;   A.WorkTimer = O.WorkTimer;
+			A.CarriedAmount = O.CarriedAmount;   A.CarriedType = O.CarriedType;
+			A.EatTimer = O.EatTimer;   A.StarveTimer = O.StarveTimer;
+			Agents.Add(A);
+		}
+
+		Buildings.Reset(OldBuildings.Num());
+		for (const FBuildingV5& O : OldBuildings)
+		{
+			FBuilding B;
+			B.Type = O.Type;   B.Position = O.Position;
+			B.ResidentTier = ETier::Peasant;
+			B.VisualScale = O.VisualScale;
+			FMemory::Memcpy(B.Stored, O.Stored, sizeof(B.Stored));
+			B.WorkTimer = O.WorkTimer;   B.AssignedWorkers = O.AssignedWorkers;
+			B.bInputClaimed = O.bInputClaimed;   B.bOutputClaimed = O.bOutputClaimed;
+			Buildings.Add(B);
+		}
+		return;
+	}
+
 	SerializeArray(Agents);
 	SerializeArray(Buildings);
 	SerializeArray(Trees);
