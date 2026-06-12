@@ -2,6 +2,7 @@
 
 #include "RealmPlayerController.h"
 #include "SBlueprintBar.h"
+#include "SIntroPanel.h"
 #include "SResourcePanel.h"
 #include "SWorkerPanel.h"
 #include "Core/SimSubsystem.h"
@@ -81,6 +82,10 @@ void ARealmPlayerController::BeginPlay()
 		.OnUnassign(SWorkerPanel::FOnWorkerChange::CreateUObject(
 			this, &ARealmPlayerController::HandleUnassignWorker));
 	GEngine->GameViewport->AddViewportWidgetContent(WorkerPanel.ToSharedRef(), /*ZOrder=*/12);
+
+	// TEMP intro window (left side, under the resource readout).
+	SAssignNew(IntroPanel, SIntroPanel);
+	GEngine->GameViewport->AddViewportWidgetContent(IntroPanel.ToSharedRef(), /*ZOrder=*/13);
 }
 
 void ARealmPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -99,10 +104,16 @@ void ARealmPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		{
 			GEngine->GameViewport->RemoveViewportWidgetContent(WorkerPanel.ToSharedRef());
 		}
+		// TEMP intro window
+		if (IntroPanel.IsValid())
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent(IntroPanel.ToSharedRef());
+		}
 	}
 	BlueprintBar.Reset();
 	ResourcePanel.Reset();
 	WorkerPanel.Reset();
+	IntroPanel.Reset();
 
 	Super::EndPlay(EndPlayReason);
 }

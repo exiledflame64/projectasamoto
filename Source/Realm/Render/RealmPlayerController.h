@@ -11,6 +11,7 @@
 #include "RealmPlayerController.generated.h"
 
 class SBlueprintBar;
+class SIntroPanel;
 class SResourcePanel;
 class SWorkerPanel;
 class URoadBuildToolComponent;
@@ -54,5 +55,7 @@ private:
 	TSharedPtr<SBlueprintBar> BlueprintBar;
 	TSharedPtr<SResourcePanel> ResourcePanel;
 	TSharedPtr<SWorkerPanel> WorkerPanel;
+	TSharedPtr<SIntroPanel> IntroPanel;   // TEMP intro window
+
 	EBlueprintKind SelectedBlueprint = EBlueprintKind::None;
 };
