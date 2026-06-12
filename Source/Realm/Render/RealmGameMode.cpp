@@ -6,11 +6,8 @@
 #include "RealmSeeds.h"
 #include "SimVisualizer.h"
 #include "Core/SimSubsystem.h"
-#include "Roads/RoadSettings.h"
 #include "Roads/TerrainHeight.h"
 #include "EngineUtils.h"
-#include "Materials/MaterialInterface.h"
-#include "VT/RuntimeVirtualTexture.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -92,10 +89,9 @@ void ARealmGameMode::SpawnGroundPlane()
 		if (It->ActorHasTag(TEXT("RealmGround")))
 		{
 			It->ForEachComponent<UPrimitiveComponent>(false,
-				[this](UPrimitiveComponent* Prim)
+				[](UPrimitiveComponent* Prim)
 				{
 					Prim->SetCollisionResponseToChannel(RealmTerrainTraceChannel, ECR_Block);
-					ApplyGroundRVT(Prim);
 				});
 			return;
 		}
@@ -125,7 +121,6 @@ void ARealmGameMode::SpawnGroundPlane()
 	MeshComp->SetMobility(EComponentMobility::Movable);
 	MeshComp->SetStaticMesh(PlaneMesh);
 	MeshComp->SetCollisionResponseToChannel(RealmTerrainTraceChannel, ECR_Block);
-	ApplyGroundRVT(MeshComp);
 
 	// Basic plane is 100 uu across; scale so half-size == GroundHalfSize.
 	const float Scale = (GroundHalfSize * 2.f) / 100.f;
@@ -134,31 +129,4 @@ void ARealmGameMode::SpawnGroundPlane()
 
 	UE_LOG(LogTemp, Log, TEXT("[Realm] Ground plane spawned (half-size %.0f cm)."),
 		GroundHalfSize);
-}
-
-void ARealmGameMode::ApplyGroundRVT(UPrimitiveComponent* GroundComponent) const
-{
-	const URoadSettings* Settings = URoadSettings::Get();
-	URuntimeVirtualTexture* RVT = Settings->GroundVirtualTexture.LoadSynchronous();
-	UMaterialInterface* GroundMat = Settings->GroundMaterial.LoadSynchronous();
-	if (!RVT || !GroundMat || !GroundComponent)
-	{
-		return;   // assets not authored yet: plain ground, roads in main pass
-	}
-
-	// An authored ground material (anything outside /Engine/) is converted
-	// in place by Tools/setup_road_assets.py — it keeps its textures and gains
-	// the RVT write/sample wiring, so it must NOT be replaced here. Only the
-	// engine basic material of the procedural fallback plane (which cannot be
-	// edited) is swapped for the flat M_Ground_RVT.
-	const UMaterialInterface* Current = GroundComponent->GetMaterial(0);
-	if (!Current || Current->GetPathName().StartsWith(TEXT("/Engine/")))
-	{
-		GroundComponent->SetMaterial(0, GroundMat);
-	}
-
-	GroundComponent->RuntimeVirtualTextures.AddUnique(RVT);
-	// Terrain must remain visible AND contribute to the VT.
-	GroundComponent->VirtualTextureRenderPassType = ERuntimeVirtualTextureMainPassType::Always;
-	GroundComponent->MarkRenderStateDirty();
 }

@@ -1,17 +1,16 @@
 // Copyright Asamoto.
-// URoadRendererSubsystem (road_todos.md Phases 3-4): turns road edges into
+// URoadRendererSubsystem: turns road edges into
 // banked ribbon meshes (one UDynamicMeshComponent per edge — simplest correct
 // granularity; merge later only if profiling demands) plus junction discs.
 //
-// Committed roads do NOT draw in the main pass when the RVT assets exist:
-// their components write into RVT_Ground (VirtualTextureRenderPassType =
-// Never), the terrain material samples the RVT, and z-fighting is structurally
-// impossible. Until Tools/setup_road_assets.py has authored those assets the
-// renderer falls back to tinted main-pass ribbons (5 cm above ground) so the
-// whole system stays testable.
+// Roads are standalone render entities, exactly like building/villager
+// proxies: meshes floating RibbonZOffset above the ground, never baked into
+// the terrain. The ground and its materials are NEVER touched. The road graph
+// (URoadNetworkSubsystem) stays the gameplay-facing entity for road
+// interaction — movement bonuses, building sockets, snapping.
 //
-// The build tool's live preview renders through here too (main pass, never
-// into the RVT), so preview and committed geometry share one code path.
+// The build tool's live preview renders through here too, so preview and
+// committed geometry share one code path.
 
 #pragma once
 
@@ -21,7 +20,6 @@
 
 class UDynamicMeshComponent;
 class UMaterialInterface;
-class URuntimeVirtualTexture;
 namespace UE::Geometry { class FDynamicMesh3; }
 
 // One segment of the build tool's live preview.
@@ -51,29 +49,8 @@ private:
 	void RebuildJunction(const FGuid& NodeId);
 	void PruneStaleComponents();
 
-	UDynamicMeshComponent* CreateRoadMeshComponent(FName BaseName, bool bCommitted,
+	UDynamicMeshComponent* CreateRoadMeshComponent(FName BaseName,
 		UMaterialInterface* Material);
-
-	// Ribbon strip: 4 verts per sample (feathered edges via vertex alpha),
-	// banked to the terrain normal, U across width, V = arc length / tiling.
-	void BuildRibbonMesh(const TArray<FVector>& Polyline, float Width,
-		UE::Geometry::FDynamicMesh3& OutMesh) const;
-
-	// Disc stamped at junction nodes so overlapping ribbons composite cleanly.
-	void BuildDiscMesh(const FVector& Center, float Radius,
-		UE::Geometry::FDynamicMesh3& OutMesh) const;
-
-	// Explicit RVT dirty-rect: component recreation usually invalidates its
-	// bounds automatically, but in-place mesh updates need this (verified
-	// against 5.7 — Invalidate on the volume's component is the reliable path).
-	void InvalidateRVT(const FBox& WorldBounds) const;
-
-	// Guarantees an ARuntimeVirtualTextureVolume covering the ground exists
-	// and points at RVT_Ground (spawned at runtime so the map needs no manual
-	// volume placement).
-	void EnsureVirtualTextureVolume(UWorld& World);
-
-	bool UseRVTPath() const { return GroundRVT && CommittedMaterial; }
 
 	UPROPERTY()
 	TObjectPtr<AActor> MeshRoot;
@@ -96,14 +73,8 @@ private:
 	TObjectPtr<UMaterialInterface> CommittedMaterial;
 
 	UPROPERTY()
-	TObjectPtr<UMaterialInterface> FallbackMaterial;
-
-	UPROPERTY()
 	TObjectPtr<UMaterialInterface> PreviewMaterialValid;
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> PreviewMaterialInvalid;
-
-	UPROPERTY()
-	TObjectPtr<URuntimeVirtualTexture> GroundRVT;
 };

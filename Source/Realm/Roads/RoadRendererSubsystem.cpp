@@ -5,15 +5,10 @@
 #include "Roads/RoadSettings.h"
 #include "Roads/TerrainHeight.h"
 #include "Components/DynamicMeshComponent.h"
-#include "Components/RuntimeVirtualTextureComponent.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "UObject/UObjectIterator.h"
-#include "VT/RuntimeVirtualTexture.h"
-#include "VT/RuntimeVirtualTextureVolume.h"
 
 using UE::Geometry::FDynamicMesh3;
 using UE::Geometry::FIndex3i;
@@ -21,10 +16,10 @@ using UE::Geometry::FIndex3i;
 namespace
 {
 	// Append one feathered ribbon strip for a polyline into Mesh. 4 verts per
-	// sample: outer pair fades to alpha 0 (the material's soft edge), inner
-	// pair spans the actual width. Banked: right vector projected to the
-	// terrain normal so the ribbon leans with slopes instead of staying
-	// world-flat.
+	// sample: outer pair fades to alpha 0 (the road material erodes its edge
+	// from it), inner pair spans the actual width. Banked: right vector
+	// projected to the terrain normal so the ribbon leans with slopes instead
+	// of staying world-flat.
 	void AppendRibbon(FDynamicMesh3& Mesh, const TArray<FVector>& Polyline,
 		float Width, float ZOffset, float FeatherFraction, float TilingLength,
 		const UTerrainHeightSubsystem* Terrain)
@@ -219,9 +214,13 @@ void URoadRendererSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 
 	const URoadSettings* Settings = URoadSettings::Get();
-	GroundRVT = Settings->GroundVirtualTexture.LoadSynchronous();
 	CommittedMaterial = Settings->RoadMaterial.LoadSynchronous();
-	FallbackMaterial = MakeTintedFallback(this, FLinearColor(0.28f, 0.19f, 0.11f));   // packed dirt
+	if (!CommittedMaterial)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Realm] Road material not authored yet "
+			"(run Tools/setup_road_assets.py); using tinted fallback."));
+		CommittedMaterial = MakeTintedFallback(this, FLinearColor(0.28f, 0.19f, 0.11f));   // packed dirt
+	}
 
 	if (UMaterialInterface* PreviewBase = Settings->PreviewMaterial.LoadSynchronous())
 	{
@@ -236,16 +235,6 @@ void URoadRendererSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	{
 		PreviewMaterialValid = MakeTintedFallback(this, FLinearColor(0.1f, 0.85f, 0.3f));
 		PreviewMaterialInvalid = MakeTintedFallback(this, FLinearColor(0.9f, 0.15f, 0.1f));
-	}
-
-	if (!CommittedMaterial)
-	{
-		UE_LOG(LogTemp, Log, TEXT("[Realm] Road RVT assets not authored yet "
-			"(run Tools/setup_road_assets.py); roads render in the main pass."));
-	}
-	if (GroundRVT)
-	{
-		EnsureVirtualTextureVolume(InWorld);
 	}
 
 	FActorSpawnParameters Params;
@@ -327,8 +316,7 @@ void URoadRendererSubsystem::RebuildEdge(const FGuid& EdgeId)
 	TObjectPtr<UDynamicMeshComponent>& Comp = EdgeMeshes.FindOrAdd(EdgeId);
 	if (!Comp)
 	{
-		Comp = CreateRoadMeshComponent(TEXT("RoadEdge"), /*bCommitted=*/true,
-			CommittedMaterial ? CommittedMaterial.Get() : FallbackMaterial.Get());
+		Comp = CreateRoadMeshComponent(TEXT("RoadEdge"), CommittedMaterial);
 	}
 
 	const URoadSettings* S = URoadSettings::Get();
@@ -338,9 +326,6 @@ void URoadRendererSubsystem::RebuildEdge(const FGuid& EdgeId)
 		S->TilingLength, GetWorld()->GetSubsystem<UTerrainHeightSubsystem>());
 	EnsureUpFacing(Mesh);
 	Comp->SetMesh(MoveTemp(Mesh));
-
-	FBox Bounds(Polyline);
-	InvalidateRVT(Bounds.ExpandBy(Edge->Width));
 }
 
 void URoadRendererSubsystem::RebuildJunction(const FGuid& NodeId)
@@ -372,21 +357,18 @@ void URoadRendererSubsystem::RebuildJunction(const FGuid& NodeId)
 	TObjectPtr<UDynamicMeshComponent>& Comp = JunctionMeshes.FindOrAdd(NodeId);
 	if (!Comp)
 	{
-		Comp = CreateRoadMeshComponent(TEXT("RoadJunction"), /*bCommitted=*/true,
-			CommittedMaterial ? CommittedMaterial.Get() : FallbackMaterial.Get());
+		Comp = CreateRoadMeshComponent(TEXT("RoadJunction"), CommittedMaterial);
 	}
 
 	const URoadSettings* S = URoadSettings::Get();
 	const float Radius = MaxWidth * S->JunctionDiscRadiusFactor;
 	FDynamicMesh3 Mesh;
 	PrepareMeshAttributes(Mesh);
-	AppendDisc(Mesh, Node->Position, Radius, S->RibbonZOffset, S->FeatherFraction,
+	// Junction sits a hair above the ribbons so the overlap never flickers.
+	AppendDisc(Mesh, Node->Position, Radius, S->RibbonZOffset + 1.f, S->FeatherFraction,
 		S->TilingLength, GetWorld()->GetSubsystem<UTerrainHeightSubsystem>());
 	EnsureUpFacing(Mesh);
 	Comp->SetMesh(MoveTemp(Mesh));
-
-	const FVector Extent(Radius * 2.f, Radius * 2.f, 100.f);
-	InvalidateRVT(FBox(Node->Position - Extent, Node->Position + Extent));
 }
 
 void URoadRendererSubsystem::PruneStaleComponents()
@@ -424,7 +406,7 @@ void URoadRendererSubsystem::PruneStaleComponents()
 }
 
 UDynamicMeshComponent* URoadRendererSubsystem::CreateRoadMeshComponent(
-	FName BaseName, bool bCommitted, UMaterialInterface* Material)
+	FName BaseName, UMaterialInterface* Material)
 {
 	UDynamicMeshComponent* Comp = NewObject<UDynamicMeshComponent>(
 		MeshRoot, MakeUniqueObjectName(MeshRoot, UDynamicMeshComponent::StaticClass(), BaseName));
@@ -434,87 +416,10 @@ UDynamicMeshComponent* URoadRendererSubsystem::CreateRoadMeshComponent(
 	{
 		Comp->SetMaterial(0, Material);
 	}
-
-	if (bCommitted && UseRVTPath())
-	{
-		// The entire anti-z-fighting trick: the ribbon exists only inside the
-		// RVT, which the terrain material samples. Never drawn in the main pass.
-		Comp->RuntimeVirtualTextures.Add(GroundRVT);
-		Comp->VirtualTextureRenderPassType = ERuntimeVirtualTextureMainPassType::Never;
-
-		// The VT pass composites primitives in sort-priority order; roads must
-		// blend over the terrain's own write, not under it.
-		Comp->SetTranslucentSortPriority(10);
-	}
-
 	Comp->RegisterComponent();
 	Comp->AttachToComponent(MeshRoot->GetRootComponent(),
 		FAttachmentTransformRules::KeepWorldTransform);
 	return Comp;
-}
-
-void URoadRendererSubsystem::EnsureVirtualTextureVolume(UWorld& World)
-{
-	// A map-placed volume wins; just make sure it has the texture assigned.
-	for (TActorIterator<ARuntimeVirtualTextureVolume> It(&World); It; ++It)
-	{
-		if (It->VirtualTextureComponent && !It->VirtualTextureComponent->GetVirtualTexture())
-		{
-			It->VirtualTextureComponent->SetVirtualTexture(GroundRVT);
-		}
-		return;
-	}
-
-	// Cover the authored ground if the map has one; otherwise a generous
-	// default around the origin (the procedural fallback plane spawns later,
-	// at GameMode BeginPlay, so it cannot be measured here).
-	FBox Bounds(ForceInit);
-	for (TActorIterator<AActor> It(&World); It; ++It)
-	{
-		if (It->ActorHasTag(TEXT("RealmGround")))
-		{
-			Bounds += It->GetComponentsBoundingBox();
-		}
-	}
-	if (!Bounds.IsValid)
-	{
-		Bounds = FBox(FVector(-20000, -20000, 0), FVector(20000, 20000, 0));
-	}
-	Bounds = Bounds.ExpandBy(FVector(0, 0, 500));   // Z must include terrain height range
-
-	FActorSpawnParameters Params;
-	Params.ObjectFlags |= RF_Transient;
-	// RVT bounds = the component's unit box [0,1]^3 under its transform. The
-	// volume's component is Static mobility, so the transform MUST be set at
-	// spawn — moving it afterwards is rejected with a mobility warning (and
-	// leaves a 1 cm^3 virtual texture at the origin).
-	const FTransform VolumeTransform(FQuat::Identity, Bounds.Min, Bounds.GetSize());
-	ARuntimeVirtualTextureVolume* Volume = World.SpawnActor<ARuntimeVirtualTextureVolume>(
-		ARuntimeVirtualTextureVolume::StaticClass(), VolumeTransform, Params);
-	if (Volume && Volume->VirtualTextureComponent)
-	{
-		Volume->VirtualTextureComponent->SetVirtualTexture(GroundRVT);
-		UE_LOG(LogTemp, Log, TEXT("[Realm] Spawned RVT volume covering %s."),
-			*Bounds.ToString());
-	}
-}
-
-void URoadRendererSubsystem::InvalidateRVT(const FBox& WorldBounds) const
-{
-	if (!UseRVTPath())
-	{
-		return;
-	}
-	// Component recreation marks its bounds dirty automatically; in-place
-	// SetMesh updates do not always reach the VT system, so dirty the volume
-	// explicitly for the edited area.
-	for (TObjectIterator<URuntimeVirtualTextureComponent> It; It; ++It)
-	{
-		if (It->GetWorld() == GetWorld() && It->GetVirtualTexture() == GroundRVT)
-		{
-			It->Invalidate(FBoxSphereBounds(WorldBounds));
-		}
-	}
 }
 
 void URoadRendererSubsystem::SetPreview(const TArray<FRoadPreviewSegment>& Segments, float Width)
@@ -525,12 +430,10 @@ void URoadRendererSubsystem::SetPreview(const TArray<FRoadPreviewSegment>& Segme
 	}
 	if (!PreviewValidMesh)
 	{
-		// Preview stays in the MAIN pass (never writes the RVT): translucent
-		// asset material when authored, tinted opaque fallback otherwise.
 		PreviewValidMesh = CreateRoadMeshComponent(TEXT("RoadPreviewValid"),
-			/*bCommitted=*/false, PreviewMaterialValid);
+			PreviewMaterialValid);
 		PreviewInvalidMesh = CreateRoadMeshComponent(TEXT("RoadPreviewInvalid"),
-			/*bCommitted=*/false, PreviewMaterialInvalid);
+			PreviewMaterialInvalid);
 	}
 
 	const URoadSettings* S = URoadSettings::Get();

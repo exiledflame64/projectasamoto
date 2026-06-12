@@ -1,5 +1,5 @@
 // Copyright Asamoto.
-// All road tunables in one UDeveloperSettings (road_todos.md "Conventions"):
+// All road tunables in one UDeveloperSettings:
 // editable under Project Settings -> Game -> Realm Roads, saved to
 // DefaultGame.ini. Distances are centimeters (project convention); the spec's
 // meter values are converted here.
@@ -11,7 +11,6 @@
 #include "RoadSettings.generated.h"
 
 class UMaterialInterface;
-class URuntimeVirtualTexture;
 
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Realm Roads"))
 class REALM_API URoadSettings : public UDeveloperSettings
@@ -71,25 +70,14 @@ public:
 	UPROPERTY(EditAnywhere, config, Category = "Geometry", meta = (ClampMin = "0.1"))
 	float JunctionDiscRadiusFactor = 0.6f;
 
-	// --- Materials / RVT (Phase 4) ---
-	// When both the RVT asset and the road material exist, committed roads
-	// render VirtualTextureOnly (the anti-z-fighting trick). When they are
-	// missing the renderer falls back to a tinted main-pass ribbon so the
-	// system stays testable before the assets are authored.
-
-	UPROPERTY(EditAnywhere, config, Category = "Rendering")
-	TSoftObjectPtr<URuntimeVirtualTexture> GroundVirtualTexture =
-		TSoftObjectPtr<URuntimeVirtualTexture>(FSoftObjectPath(TEXT("/Game/Realm/Roads/RVT_Ground.RVT_Ground")));
-
-	// Terrain material with the RVT write/sample wiring; the game mode applies
-	// it to whatever provides the ground when the RVT path is active.
-	UPROPERTY(EditAnywhere, config, Category = "Rendering")
-	TSoftObjectPtr<UMaterialInterface> GroundMaterial =
-		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Realm/Roads/M_Ground_RVT.M_Ground_RVT")));
+	// --- Materials ---
+	// Roads are standalone meshes above the ground (never baked into the
+	// terrain; the ground and its materials are not touched). Missing assets
+	// fall back to tinted engine materials so the system stays testable.
 
 	UPROPERTY(EditAnywhere, config, Category = "Rendering")
 	TSoftObjectPtr<UMaterialInterface> RoadMaterial =
-		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Realm/Roads/M_Road_RVT.M_Road_RVT")));
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Realm/Roads/M_Road.M_Road")));
 
 	UPROPERTY(EditAnywhere, config, Category = "Rendering")
 	TSoftObjectPtr<UMaterialInterface> PreviewMaterial =
