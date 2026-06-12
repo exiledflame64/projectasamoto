@@ -11,6 +11,9 @@ DerivedDataCache/
 Intermediate/
 Saved/
 
+# Packaged Demos
+Packaged/
+
 # Template textures
 template_assets/
 
