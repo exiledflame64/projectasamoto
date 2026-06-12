@@ -1,7 +1,8 @@
 // Copyright Asamoto.
 
 #include "RealmSeeds.h"
-#include "RealmVisualSet.h"
+#include "Render/Visuals/BuildingVisualSet.h"
+#include "Render/Visuals/VegetationVisualSet.h"
 #include "Core/SimSubsystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/GameInstance.h"
@@ -32,11 +33,12 @@ void AResourceSeed::OnConstruction(const FTransform& Transform)
 
 	// Preview comes from the shared visual set, so the editor shows exactly
 	// what the runtime proxy will look like. (Per-instance mesh edits are
-	// intentionally overridden — author appearance in the RealmVisualSet asset.)
+	// intentionally overridden — author appearance in the VegetationVisualSet
+	// asset.)
 	// NOTE: Mesh is the ROOT component — never set its relative location or
 	// (after the first run) scale here; both would overwrite the actor's
 	// editor-authored transform on every construction.
-	const URealmVisualSet* Set = URealmVisualSet::Resolve();
+	const UVegetationVisualSet* Set = UVegetationVisualSet::Resolve();
 	Set->Tree.ApplyTo(Mesh, this, /*bApplyScale=*/false);   // per-Kind lookup when stone/iron arrive
 	if (!bScaleInitialized)
 	{
@@ -84,8 +86,7 @@ void ABuildingSeed::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	// Same root-component caveat as AResourceSeed: appearance only, no transform.
-	const URealmVisualSet* Set = URealmVisualSet::Resolve();
-	const FRealmMeshDef& Def = Set->BuildingDef(Type);
+	const FRealmMeshDef& Def = UBuildingVisualSet::Resolve()->BuildingDef(Type);
 	Def.ApplyTo(Mesh, this, /*bApplyScale=*/false);
 	if (!bScaleInitialized)
 	{

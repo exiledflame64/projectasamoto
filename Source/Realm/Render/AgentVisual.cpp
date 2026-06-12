@@ -1,7 +1,7 @@
 // Copyright Asamoto.
 
 #include "AgentVisual.h"
-#include "RealmVisualSet.h"
+#include "Render/Visuals/VillagerVisualSet.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -35,9 +35,8 @@ void AAgentVisual::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Appearance from the shared visual set (asset or C++ defaults).
-	const URealmVisualSet* Set = URealmVisualSet::Resolve();
-	const FRealmMeshDef& Def = Set->Villager;
+	// Appearance from the villager visual set (asset or C++ defaults).
+	const FRealmMeshDef& Def = UVillagerVisualSet::Resolve()->Villager;
 	Def.ApplyTo(Mesh, this);
 	Mesh->SetRelativeLocation(FVector(0.f, 0.f, Def.GroundLift()));
 	MeshMID = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0));

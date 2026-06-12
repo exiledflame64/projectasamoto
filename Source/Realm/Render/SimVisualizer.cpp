@@ -2,7 +2,8 @@
 
 #include "SimVisualizer.h"
 #include "AgentVisual.h"
-#include "RealmVisualSet.h"
+#include "Render/Visuals/BuildingVisualSet.h"
+#include "Render/Visuals/VegetationVisualSet.h"
 #include "Core/SimSubsystem.h"
 
 #include "Engine/StaticMeshActor.h"
@@ -20,7 +21,8 @@ ASimVisualizer::ASimVisualizer()
 void ASimVisualizer::BeginPlay()
 {
 	Super::BeginPlay();
-	VisualSet = URealmVisualSet::Resolve();
+	BuildingSet = UBuildingVisualSet::Resolve();
+	VegetationSet = UVegetationVisualSet::Resolve();
 }
 
 AStaticMeshActor* ASimVisualizer::SpawnVisual(const FRealmMeshDef& Def)
@@ -65,7 +67,7 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 
 	const UGameInstance* GI = GetGameInstance();
 	const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
-	if (!Sub || !VisualSet)
+	if (!Sub || !BuildingSet || !VegetationSet)
 	{
 		return;
 	}
@@ -77,7 +79,7 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 	for (int32 i = 0; i < Snap.Buildings.Num(); ++i)
 	{
 		const EBuildingType Type = Snap.Buildings[i].Type;
-		const FRealmMeshDef& Def = VisualSet->BuildingDef(Type);
+		const FRealmMeshDef& Def = BuildingSet->BuildingDef(Type);
 
 		// Respawn when the type at this index changed (happens after a load).
 		if (BuildingVisuals.IsValidIndex(i) && BuildingVisualTypes[i] != Type)
@@ -95,7 +97,7 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 			BuildingVisualTypes[i] = Type;
 			if (Type == EBuildingType::Farm)
 			{
-				FieldVisuals[i] = SpawnVisual(VisualSet->FieldPlot);
+				FieldVisuals[i] = SpawnVisual(BuildingSet->FieldPlot);
 			}
 		}
 		if (i >= BuildingVisuals.Num())
@@ -103,7 +105,7 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 			BuildingVisuals.Add(SpawnVisual(Def));
 			BuildingVisualTypes.Add(Type);
 			FieldVisuals.Add(Type == EBuildingType::Farm
-				? SpawnVisual(VisualSet->FieldPlot) : nullptr);
+				? SpawnVisual(BuildingSet->FieldPlot) : nullptr);
 		}
 		if (AStaticMeshActor* A = BuildingVisuals[i])
 		{
@@ -117,7 +119,7 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 		if (FieldVisuals.IsValidIndex(i) && FieldVisuals[i])
 		{
 			FieldVisuals[i]->SetActorLocation(Snap.Buildings[i].Position
-				+ FVector(FarmFieldOffset, 0.f, VisualSet->FieldPlot.GroundLift() + 1.f));
+				+ FVector(FarmFieldOffset, 0.f, BuildingSet->FieldPlot.GroundLift() + 1.f));
 		}
 	}
 
@@ -126,14 +128,14 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 	{
 		if (i >= TreeVisuals.Num())
 		{
-			TreeVisuals.Add(SpawnVisual(VisualSet->Tree));
+			TreeVisuals.Add(SpawnVisual(VegetationSet->Tree));
 		}
 		if (AStaticMeshActor* A = TreeVisuals[i])
 		{
-			const FVector EffScale = VisualSet->Tree.EffectiveScale(Snap.Trees[i].VisualScale);
+			const FVector EffScale = VegetationSet->Tree.EffectiveScale(Snap.Trees[i].VisualScale);
 			A->SetActorScale3D(EffScale);
 			A->SetActorLocation(Snap.Trees[i].Position
-				+ FVector(0.f, 0.f, VisualSet->Tree.GroundLiftFor(EffScale)));
+				+ FVector(0.f, 0.f, VegetationSet->Tree.GroundLiftFor(EffScale)));
 			A->SetActorHiddenInGame(Snap.Trees[i].Remaining <= 0);
 		}
 	}

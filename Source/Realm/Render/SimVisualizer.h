@@ -13,7 +13,8 @@
 
 class AAgentVisual;
 class AStaticMeshActor;
-class URealmVisualSet;
+class UBuildingVisualSet;
+class UVegetationVisualSet;
 struct FRealmMeshDef;
 
 UCLASS()
@@ -46,9 +47,13 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<AStaticMeshActor>> TreeVisuals;
 
-	// All appearance comes from the shared visual set (asset or C++ defaults).
+	// Appearance comes from the per-category visual sets (assets or C++
+	// defaults); villagers resolve theirs inside AAgentVisual.
 	UPROPERTY()
-	TObjectPtr<const URealmVisualSet> VisualSet;
+	TObjectPtr<const UBuildingVisualSet> BuildingSet;
+
+	UPROPERTY()
+	TObjectPtr<const UVegetationVisualSet> VegetationSet;
 
 	AStaticMeshActor* SpawnVisual(const FRealmMeshDef& Def);
 	FVector GetCameraLocation() const;
