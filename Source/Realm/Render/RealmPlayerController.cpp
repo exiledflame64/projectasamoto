@@ -278,8 +278,14 @@ void ARealmPlayerController::HandleUnassignWorker(int32 BuildingIndex)
 
 void ARealmPlayerController::OnRoadUndo()
 {
+	// RMB doubles as "cancel placement": with a building blueprint armed,
+	// disarm it (same as re-clicking its bar button).
 	if (!RoadTool || !RoadTool->IsToolActive())
 	{
+		if (SelectedBlueprint != EBlueprintKind::None)
+		{
+			HandleBlueprintClicked(SelectedBlueprint);
+		}
 		return;
 	}
 	if (!RoadTool->HandleUndo())
