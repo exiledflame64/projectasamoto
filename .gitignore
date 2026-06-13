@@ -48,9 +48,4 @@ Thumbs.db
 # ---------------------------------------------------------------------------
 # Project-local planning / handoff docs (not part of the shipped project)
 # ---------------------------------------------------------------------------
-baoding.md
-road_todos.md
-road_snapping_todos.md
-todos.md
-introduction.md
-population_todos.md
+ideas/

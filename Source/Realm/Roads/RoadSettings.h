@@ -64,6 +64,33 @@ public:
 	UPROPERTY(EditAnywhere, config, Category = "Snapping & Placement", meta = (ClampMin = "1"))
 	float RotationStepDegrees = 15.f;
 
+	// --- Villager navigation (pathfinding.md §4.3) ---
+	// Baked into FSimNavParams at road-change time; the sim never reads settings.
+
+	// Speed multiplier applied while an agent walks a road segment (stacks with
+	// the starving factor). An honest physics gain — kept modest.
+	UPROPERTY(EditAnywhere, config, Category = "Navigation", meta = (ClampMin = "1.0", ClampMax = "3.0"))
+	float RoadSpeedFactor = 1.1f;
+
+	// Planner cost weight for road distance (< 1 makes roads "attractive"). A
+	// trip uses a road once the straight beeline costs more than reaching the
+	// road + the discounted road run + leaving it; the crossover separation is
+	// roughly 2 * (building-to-road offset) / (1 - RoadCostMul). At 0.5 villagers
+	// stick to roads for typical settlement distances and accept road routes up
+	// to ~2x the beeline. Raise toward 0.85 if they detour too eagerly; lower
+	// toward 0.3 for near-universal road use on short hops (pathfinding.md §5.2).
+	UPROPERTY(EditAnywhere, config, Category = "Navigation", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float RoadCostMul = 0.5f;
+
+	// Max distance from a start/goal to a road for the network to be considered
+	// at all (spec: 15 m).
+	UPROPERTY(EditAnywhere, config, Category = "Navigation", meta = (ClampMin = "0"))
+	float MaxAttachDist = 1500.f;
+
+	// Arrival tolerance per path waypoint.
+	UPROPERTY(EditAnywhere, config, Category = "Navigation", meta = (ClampMin = "1"))
+	float WaypointReachDist = 30.f;
+
 	// --- Sampling / geometry ---
 
 	// Arc-length resample spacing for edge polylines (spec: 0.5-1.0 m).

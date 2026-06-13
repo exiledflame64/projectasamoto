@@ -7,6 +7,7 @@
 
 #include "CoreMinimal.h"
 #include "SimTypes.h"
+#include "NavRoads.h"
 
 class REALM_API FSimWorld
 {
@@ -49,6 +50,20 @@ public:
 	bool UpgradeHouse(FBuildingId House, ETier Target);
 	bool DowngradeHouse(FBuildingId House);
 
+	// Road navigation (pathfinding.md). The render/roads side bakes the road
+	// graph into FSimNavRoads and hands it in here (never the other way around);
+	// each handoff bumps NavVersion so walking agents lazily replan. Called on
+	// the game thread between ticks, so the swap is never mid-phase (§9).
+	void SetNavRoads(FSimNavRoads&& In, const FSimNavParams& Params);
+	uint32 GetNavVersion() const { return NavVersion; }
+	const FSimNavParams& GetNavParams() const { return NavParams; }
+	const FSimNavRoads&  GetNavRoads()  const { return NavRoads; }
+
+	// Debug/tooling (realm.DebugPath, tests): plan a path for an agent and send
+	// it walking toward Goal. Returns false for an invalid/dead agent.
+	bool DebugMoveAgent(FAgentId Agent, const FVector& Goal);
+	bool GetAgentPath(FAgentId Agent, FAgentPath& Out) const;
+
 	// Produce a read-only snapshot for the renderer.
 	void BuildSnapshot(FSimSnapshot& Out) const;
 
@@ -65,6 +80,14 @@ private:
 	TArray<FBuilding> Buildings;
 	TArray<FTree>     Trees;
 	int64 TickNumber = 0;
+
+	// Road navigation. AgentPaths is a parallel array (same handle as Agents),
+	// excluded from serialization — paths are replanned after load (§8). NavRoads
+	// is baked from the saved road graph on load, so it is not serialized either.
+	TArray<FAgentPath> AgentPaths;
+	FSimNavRoads       NavRoads;
+	FSimNavParams      NavParams;
+	uint32             NavVersion = 0;
 
 	bool bEverHadAgents = false;   // lose state only arms once someone lived
 	bool bGameOver      = false;

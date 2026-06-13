@@ -4,10 +4,15 @@
 // building's work loop until unassigned (sticky assignment, one building each).
 
 #include "SimWorld.h"
+#include "RoadPathfinder.h"
 
 namespace
 {
 	// Tuning.
+	// Version-bump replan amortization: at most this many walking agents replan
+	// per tick when a new road network is swapped in (§7). Brand-new movement
+	// legs always plan immediately and are not counted against this budget.
+	constexpr int32 MaxReplansPerTick = 16;
 	constexpr float ChopDuration       = 1.5f;   // seconds of "chopping" per log
 	constexpr float SawDuration        = 3.0f;   // seconds per log -> plank
 	constexpr float FieldWorkDuration  = 4.0f;   // seconds tending per harvest
@@ -395,28 +400,92 @@ void FSimWorld::Phase_Production(float Dt)
 
 void FSimWorld::Phase_Movement(float Dt)
 {
-	// Step agents toward Target along (eventually) a flow field. For now a
-	// straight-line step is enough to exercise arrival detection.
-	for (FAgent& A : Agents)
+	// Follow each moving agent's planned FAgentPath (pathfinding.md §6). Paths
+	// are planned lazily here at the moment an agent starts walking a new leg, so
+	// no other phase needs to know about pathfinding — they keep setting A.Target
+	// exactly as before, and the final waypoint == A.Target keeps arrival
+	// detection unchanged.
+	AgentPaths.SetNum(Agents.Num());   // keep the parallel array sized to Agents
+
+	int32 ReplansThisTick = 0;
+	for (int32 i = 0; i < Agents.Num(); ++i)
 	{
-		if (A.State == EAgentState::MovingToWork ||
-			A.State == EAgentState::MovingToStore ||
-			A.State == EAgentState::MovingToPickup ||
-			A.State == EAgentState::MovingToDeliver)
+		FAgent& A = Agents[i];
+		if (A.State != EAgentState::MovingToWork &&
+			A.State != EAgentState::MovingToStore &&
+			A.State != EAgentState::MovingToPickup &&
+			A.State != EAgentState::MovingToDeliver)
 		{
-			const FVector To   = A.Target - A.Position;
-			const float   Dist = To.Size();
-			const float   Step = A.Speed * Dt * StarvingMult(A);   // 1/5 speed while starving
-			if (Dist <= Step)
-			{
-				A.Position = A.Target;   // arrival handled next tick in job/production
-			}
-			else
-			{
-				A.Position += To / Dist * Step;
-			}
+			continue;
+		}
+
+		FAgentPath& Path = AgentPaths[i];
+		const FVector2D Goal2D(A.Target.X, A.Target.Y);
+
+		// A genuinely new leg (target changed, or the previous path is empty /
+		// already consumed) plans immediately. A path merely stale because the
+		// road network changed counts against the per-tick replan budget; until
+		// it gets its turn the agent keeps walking its old (still-valid) path.
+		const bool bNewLeg = Path.Waypoints.Num() == 0 || Path.IsConsumed() ||
+			!Path.FinalGoal.Equals(Goal2D, 1.f);
+		const bool bStale = Path.PlannedNavVersion != NavVersion;
+
+		if (bNewLeg)
+		{
+			const FVector2D Start2D(A.Position.X, A.Position.Y);
+			Path = RoadPathfinder::PlanPath(Start2D, Goal2D, NavRoads, NavParams);
+			Path.PlannedNavVersion = NavVersion;
+		}
+		else if (bStale && ReplansThisTick < MaxReplansPerTick)
+		{
+			const FVector2D Start2D(A.Position.X, A.Position.Y);
+			Path = RoadPathfinder::PlanPath(Start2D, Goal2D, NavRoads, NavParams);
+			Path.PlannedNavVersion = NavVersion;
+			++ReplansThisTick;
+		}
+
+		const float BaseStep = A.Speed * Dt * StarvingMult(A);   // 1/5 speed while starving
+		const FVector2D Pos2D(A.Position.X, A.Position.Y);
+		const FVector2D New2D = Nav::StepAlongPath(Path, Pos2D, BaseStep, NavParams);
+		if (Path.IsConsumed())
+		{
+			A.Position = A.Target;   // snap exactly so arrival fires next tick (§6)
+		}
+		else
+		{
+			A.Position.X = New2D.X;
+			A.Position.Y = New2D.Y;   // Z stays on the sim's flat plane (render lifts it)
 		}
 	}
+}
+
+void FSimWorld::SetNavRoads(FSimNavRoads&& In, const FSimNavParams& Params)
+{
+	NavRoads   = MoveTemp(In);
+	NavParams  = Params;
+	NavRoads.Version = ++NavVersion;   // walking agents lazily replan (§7)
+}
+
+bool FSimWorld::DebugMoveAgent(FAgentId Agent, const FVector& Goal)
+{
+	if (!Agents.IsValidIndex(Agent) || Agents[Agent].State == EAgentState::Dead)
+	{
+		return false;
+	}
+	FAgent& A = Agents[Agent];
+	A.Target = Goal;
+	A.State  = EAgentState::MovingToWork;   // Phase_Movement plans on the next tick
+	return true;
+}
+
+bool FSimWorld::GetAgentPath(FAgentId Agent, FAgentPath& Out) const
+{
+	if (!AgentPaths.IsValidIndex(Agent))
+	{
+		return false;
+	}
+	Out = AgentPaths[Agent];
+	return true;
 }
 
 // --- Per-building work loops ---
@@ -863,7 +932,9 @@ FAgentId FSimWorld::SpawnAgent(const FVector& Pos, FBuildingId Home)
 	A.Position     = Pos;
 	A.HomeBuilding = Home;   // tier is derived from this house's ResidentTier
 	bEverHadAgents = true;
-	return Agents.Add(A);
+	const FAgentId Id = Agents.Add(A);
+	AgentPaths.SetNum(Agents.Num());   // parallel path slot (replanned on demand)
+	return Id;
 }
 
 FTreeId FSimWorld::SpawnTree(const FVector& Pos, const FVector& VisualScale)
@@ -1174,6 +1245,8 @@ void FSimWorld::Serialize(FArchive& Ar)
 			B.bInputClaimed = O.bInputClaimed;   B.bOutputClaimed = O.bOutputClaimed;
 			Buildings.Add(B);
 		}
+		AgentPaths.Reset();
+		AgentPaths.SetNum(Agents.Num());   // paths aren't saved; replanned on load (§8)
 		return;
 	}
 
@@ -1200,10 +1273,18 @@ void FSimWorld::Serialize(FArchive& Ar)
 			B.YawDegrees = 0.f;
 			Buildings.Add(B);
 		}
+		AgentPaths.Reset();
+		AgentPaths.SetNum(Agents.Num());   // paths aren't saved; replanned on load (§8)
 		return;
 	}
 
 	SerializeArray(Agents);
 	SerializeArray(Buildings);
 	SerializeArray(Trees);
+
+	if (Ar.IsLoading())
+	{
+		AgentPaths.Reset();
+		AgentPaths.SetNum(Agents.Num());   // paths aren't saved; replanned on load (§8)
+	}
 }
