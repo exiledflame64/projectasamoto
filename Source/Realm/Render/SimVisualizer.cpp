@@ -114,6 +114,9 @@ void ASimVisualizer::Tick(float DeltaSeconds)
 			A->SetActorScale3D(EffScale);
 			A->SetActorLocation(Snap.Buildings[i].Position
 				+ FVector(0.f, 0.f, Def.GroundLiftFor(EffScale)));
+			// Placement yaw + the mesh's front-facing correction.
+			A->SetActorRotation(FRotator(0.f,
+				Snap.Buildings[i].YawDegrees + Def.FrontYawOffsetDegrees, 0.f));
 		}
 		// Field plot (the farm's sub-building) sits beside the farm.
 		if (FieldVisuals.IsValidIndex(i) && FieldVisuals[i])

@@ -4,6 +4,7 @@
 // Run: Automation RunTests Realm.Roads
 
 #include "Roads/RoadGraph.h"
+#include "Roads/RoadSnapMath.h"
 #include "Misc/AutomationTest.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
@@ -258,6 +259,140 @@ bool FRoadGraphSerializeTest::RunTest(const FString& Parameters)
 			}
 		}
 	}
+	return true;
+}
+
+// --- Road–building snapping (road_snapping_todos.md §9) ---
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoadGraphClosestPointTest,
+	"Realm.Roads.ClosestPoint",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FRoadGraphClosestPointTest::RunTest(const FString& Parameters)
+{
+	FRoadGraph Graph;
+	const FGuid A = Graph.AddNode(FVector(0, 0, 0));
+	const FGuid B = Graph.AddNode(FVector(1000, 0, 0));
+	const FGuid AB = Graph.AddEdge(A, B, 0.f, 300.f, ERoadTier::DirtPath);   // straight
+
+	// Within range: closest point projects onto the chord, tangent is +X.
+	const FRoadClosestPoint Hit = Graph.FindClosestPointOnNetwork(FVector(500, 200, 0), 300.f);
+	TestTrue(TEXT("hit found"), Hit.bValid);
+	TestEqual(TEXT("hit on the edge"), Hit.EdgeId, AB);
+	TestTrue(TEXT("closest point ~ (500,0)"),
+		FMath::Abs(Hit.Point.X - 500.f) < 1.f && FMath::Abs(Hit.Point.Y) < 1.f);
+	TestTrue(TEXT("tangent is +X"),
+		FVector2D(Hit.Tangent.X, Hit.Tangent.Y).Equals(FVector2D(1, 0), 0.01f));
+	TestTrue(TEXT("distance ~ 200"), FMath::Abs(Hit.Distance - 200.f) < 1.f);
+
+	// Beyond MaxDistance: miss.
+	TestFalse(TEXT("out of range misses"),
+		Graph.FindClosestPointOnNetwork(FVector(500, 400, 0), 300.f).bValid);
+
+	// Two edges (an L): the nearer one wins.
+	const FGuid C = Graph.AddNode(FVector(1000, 1000, 0));
+	const FGuid BC = Graph.AddEdge(B, C, 0.f, 300.f, ERoadTier::DirtPath);
+	const FRoadClosestPoint Near = Graph.FindClosestPointOnNetwork(FVector(1100, 500, 0), 400.f);
+	TestTrue(TEXT("L: hit found"), Near.bValid);
+	TestEqual(TEXT("L: picks the vertical leg"), Near.EdgeId, BC);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoadBuildingSnapMathTest,
+	"Realm.Roads.BuildingSnap",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FRoadBuildingSnapMathTest::RunTest(const FString& Parameters)
+{
+	const FVector RoadPoint(0, 0, 0);
+	const FVector Tangent(1, 0, 0);
+	const float HalfDepth = 100.f, HalfWidth = 150.f, Gap = 10.f;
+	const float Offset = HalfWidth + Gap + HalfDepth;   // 260
+
+	// Cursor north (+Y): building lands north, -X wall faces the road, yaw 90.
+	const RoadSnap::FBuildingSnap North = RoadSnap::ComputeBuildingSnap(
+		RoadPoint, Tangent, FVector(0, 300, 0), HalfDepth, HalfWidth, Gap);
+	TestTrue(TEXT("north pos"), North.Position.Equals(FVector(0, Offset, 0), 0.1f));
+	TestTrue(TEXT("north yaw 90"), FMath::IsNearlyEqual(North.YawDegrees, 90.f, 0.1f));
+
+	// Cursor south (-Y): mirror, yaw -90.
+	const RoadSnap::FBuildingSnap South = RoadSnap::ComputeBuildingSnap(
+		RoadPoint, Tangent, FVector(0, -300, 0), HalfDepth, HalfWidth, Gap);
+	TestTrue(TEXT("south pos"), South.Position.Equals(FVector(0, -Offset, 0), 0.1f));
+	TestTrue(TEXT("south yaw -90"), FMath::IsNearlyEqual(South.YawDegrees, -90.f, 0.1f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoadWallSnapMathTest,
+	"Realm.Roads.WallSnap",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FRoadWallSnapMathTest::RunTest(const FString& Parameters)
+{
+	// Building at yaw 37, footprint (depth 100, width 150). For each of the 4
+	// walls, a query just outside its midpoint must snap to a line offset
+	// (RoadHalfWidth + Gap) outward along that wall's normal.
+	const float Yaw = 37.f, HalfWidth = 150.f, Gap = 10.f, Trigger = 300.f;
+	const FVector2D Foot(100.f, 150.f);
+	const FVector Center(400, -200, 0);
+
+	const float Rad = FMath::DegreesToRadians(Yaw);
+	const float S = FMath::Sin(Rad), C = FMath::Cos(Rad);
+	auto Rot = [&](const FVector2D& V) {
+		return FVector2D(V.X * C - V.Y * S, V.X * S + V.Y * C);
+	};
+	const FVector2D LocalCorners[4] = {
+		{  Foot.X,  Foot.Y }, { -Foot.X,  Foot.Y }, { -Foot.X, -Foot.Y }, {  Foot.X, -Foot.Y } };
+	const FVector2D LocalNormals[4] = { { 0, 1 }, { -1, 0 }, { 0, -1 }, { 1, 0 } };
+	const FVector2D Origin(Center.X, Center.Y);
+
+	for (int32 i = 0; i < 4; ++i)
+	{
+		const FVector2D E0 = Origin + Rot(LocalCorners[i]);
+		const FVector2D E1 = Origin + Rot(LocalCorners[(i + 1) % 4]);
+		const FVector2D M = Rot(LocalNormals[i]);
+		const FVector2D Mid = (E0 + E1) * 0.5f;
+		const FVector Query(Mid.X + M.X * 60.f, Mid.Y + M.Y * 60.f, 0.f);   // 60 cm out
+
+		const RoadSnap::FWallSnap Snap = RoadSnap::ComputeWallSnap(
+			Center, Foot, Yaw, Query, HalfWidth, Gap, Trigger);
+		TestTrue(FString::Printf(TEXT("wall %d snapped"), i), Snap.bValid);
+
+		// Perpendicular distance from the snapped point out to the wall == offset.
+		const FVector2D Pt(Snap.Point.X, Snap.Point.Y);
+		const float Perp = FVector2D::DotProduct(Pt - E0, M);
+		TestTrue(FString::Printf(TEXT("wall %d offset"), i),
+			FMath::Abs(Perp - (HalfWidth + Gap)) < 0.5f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoadCorridorOverlapTest,
+	"Realm.Roads.CorridorOverlap",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FRoadCorridorOverlapTest::RunTest(const FString& Parameters)
+{
+	FRoadGraph Graph;
+	const FGuid A = Graph.AddNode(FVector(-1000, 0, 0));
+	const FGuid B = Graph.AddNode(FVector(1000, 0, 0));
+	Graph.AddEdge(A, B, 0.f, 300.f, ERoadTier::DirtPath);   // half-width 150
+	const float HalfWidth = 150.f;
+
+	// A building snapped flush at a 10 cm gap (computed the same way as placement):
+	// its near face sits 160 cm from the centerline, 10 cm clear of the corridor.
+	const RoadSnap::FBuildingSnap Snap = RoadSnap::ComputeBuildingSnap(
+		FVector(0, 0, 0), FVector(1, 0, 0), FVector(0, 300, 0), 100.f, HalfWidth, 10.f);
+	TestFalse(TEXT("flush 10cm gap does not overlap"),
+		Graph.DoesCorridorOverlapOBB(Snap.Position, FVector2D(100, 150), Snap.YawDegrees, HalfWidth));
+
+	// Same box pulled onto the centerline straddles the corridor.
+	TestTrue(TEXT("straddling box overlaps"),
+		Graph.DoesCorridorOverlapOBB(FVector(0, 100, 0), FVector2D(100, 150), 90.f, HalfWidth));
+
+	// Far away: clear.
+	TestFalse(TEXT("distant box is clear"),
+		Graph.DoesCorridorOverlapOBB(FVector(0, 2000, 0), FVector2D(100, 150), 0.f, HalfWidth));
+
+	// A rotated box clipping the corridor edge still registers.
+	TestTrue(TEXT("rotated box clipping corridor overlaps"),
+		Graph.DoesCorridorOverlapOBB(FVector(0, 200, 0), FVector2D(120, 120), 45.f, HalfWidth));
 	return true;
 }
 

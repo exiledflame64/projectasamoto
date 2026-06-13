@@ -7,6 +7,9 @@
 #include "SWorkerPanel.h"
 #include "Core/SimSubsystem.h"
 #include "Roads/RoadBuildTool.h"
+#include "Roads/RoadNetworkSubsystem.h"
+#include "Roads/RoadSnapMath.h"
+#include "Roads/RoadSettings.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
@@ -140,7 +143,21 @@ void ARealmPlayerController::SetupInputComponent()
 			this, &ARealmPlayerController::OnRoadCurveInc);
 		InputComponent->BindAction("Road_CurveDec", IE_Pressed,
 			this, &ARealmPlayerController::OnRoadCurveDec);
+		InputComponent->BindAction("Build_RotateCW", IE_Pressed,
+			this, &ARealmPlayerController::OnBuildRotateCW);
+		InputComponent->BindAction("Build_RotateCCW", IE_Pressed,
+			this, &ARealmPlayerController::OnBuildRotateCCW);
 	}
+}
+
+bool ARealmPlayerController::IsBuildingGhostArmed() const
+{
+	if (SelectedBlueprint == EBlueprintKind::None || SelectedBlueprint == EBlueprintKind::Road)
+	{
+		return false;
+	}
+	const FBlueprintDef* Def = FindBlueprintDef(SelectedBlueprint);
+	return Def && Def->bAvailable;
 }
 
 void ARealmPlayerController::Tick(float DeltaSeconds)
@@ -184,31 +201,89 @@ void ARealmPlayerController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	FVector Loc;
-	if (!TraceCursorToGround(Loc))
+	FVector Pos;
+	float   Yaw;
+	bool    bValid;
+	if (!ComputeBuildingPlacement(Def->BuildingType, Pos, Yaw, bValid))
 	{
-		return;
+		return;   // cursor not over the ground
 	}
 
-	// Generic footprint extent (debug-art scale; per-type sizes live render-side).
-	const FVector Half(120.f, 120.f, 80.f);
-	const FVector Center = Loc + FVector(0.f, 0.f, Half.Z);
-	const bool bValid = Sub->GetSim().CanPlaceBuilding(Def->BuildingType, Loc);
+	// Per-type rectangular footprint, oriented by the (snapped or manual) yaw.
+	const FVector2D Foot = BuildingFootprintHalfSize(Def->BuildingType);
+	const FVector   Half(Foot.X, Foot.Y, 80.f);
+	const FVector   Center = Pos + FVector(0.f, 0.f, Half.Z);
+	const FQuat     Rot = FRotator(0.f, Yaw, 0.f).Quaternion();
 
 	const FColor Fill = bValid ? FColor(30, 200, 80, 70) : FColor(220, 45, 30, 70);
 	const FColor Line = bValid ? FColor(40, 230, 100)    : FColor(255, 60, 40);
-	DrawDebugSolidBox(GetWorld(), Center, Half, Fill);
-	DrawDebugBox(GetWorld(), Center, Half, Line);
+	DrawDebugSolidBox(GetWorld(), Center, Half, Rot, Fill);
+	DrawDebugBox(GetWorld(), Center, Half, Rot, Line);
 
-	// A farm also claims its field plot — preview it so the red/green verdict
-	// is legible.
+	// A farm also claims its field plot — preview it so the red/green verdict is
+	// legible. The field stays axis-aligned regardless of building yaw (§3.3).
 	if (Def->BuildingType == EBuildingType::Farm)
 	{
 		const FVector FieldHalf(FarmFieldHalfSize, FarmFieldHalfSize, 6.f);
-		const FVector FieldCenter = Loc + FVector(FarmFieldOffset, 0.f, FieldHalf.Z);
+		const FVector FieldCenter = Pos + FVector(FarmFieldOffset, 0.f, FieldHalf.Z);
 		DrawDebugSolidBox(GetWorld(), FieldCenter, FieldHalf, Fill);
 		DrawDebugBox(GetWorld(), FieldCenter, FieldHalf, Line);
 	}
+}
+
+bool ARealmPlayerController::ComputeBuildingPlacement(EBuildingType Type,
+	FVector& OutPos, float& OutYaw, bool& bOutValid) const
+{
+	FVector Cursor;
+	if (!TraceCursorToGround(Cursor))
+	{
+		return false;
+	}
+
+	const UGameInstance* GI = GetGameInstance();
+	const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+	if (!Sub)
+	{
+		return false;
+	}
+
+	const URoadSettings* S = URoadSettings::Get();
+	const FVector2D Foot = BuildingFootprintHalfSize(Type);
+	const URoadNetworkSubsystem* Roads = GetWorld()
+		? GetWorld()->GetSubsystem<URoadNetworkSubsystem>() : nullptr;
+
+	FVector Pos = Cursor;
+	float   Yaw = ManualYawDegrees;
+
+	// Alt (or the master switch off) bypasses snapping → full manual control.
+	const bool bAlt = IsInputKeyDown(EKeys::LeftAlt) || IsInputKeyDown(EKeys::RightAlt);
+	if (!bAlt && S->bPlacementSnappingEnabled && Roads)
+	{
+		// Trigger is measured from the road SURFACE, not its centerline: a 300 cm
+		// road already puts the centerline 150 cm from the edge, so add the half-
+		// width. The ghost then snaps while hovering anywhere on the road (or up
+		// to SnapTriggerRadiusCm beyond its edge), not only near the center.
+		const float RoadHalfWidth = S->DefaultWidth * 0.5f;
+		FRoadClosestPoint Hit;
+		if (Roads->FindClosestRoadPoint(Cursor, S->SnapTriggerRadiusCm + RoadHalfWidth, Hit))
+		{
+			const RoadSnap::FBuildingSnap Snap = RoadSnap::ComputeBuildingSnap(
+				Hit.Point, Hit.Tangent, Cursor, Foot.X, RoadHalfWidth, S->SnapGapCm);
+			Pos = Snap.Position;
+			Yaw = Snap.YawDegrees;   // snap yaw overrides manual rotation
+		}
+	}
+	Pos.Z = 0.f;   // sim lives on the ground plane
+
+	// Both gates must pass: sim disc/spacing rules AND no road-corridor overlap
+	// (strict, so the flush snapped 10 cm gap still reads valid).
+	const bool bSimOk  = Sub->GetSim().CanPlaceBuilding(Type, Pos);
+	const bool bRoadOk = !Roads || !Roads->DoesAnyRoadOverlapFootprint(Pos, Foot, Yaw);
+
+	OutPos    = Pos;
+	OutYaw    = Yaw;
+	bOutValid = bSimOk && bRoadOk;
+	return true;
 }
 
 bool ARealmPlayerController::TraceCursorToGround(FVector& OutLoc) const
@@ -236,6 +311,7 @@ void ARealmPlayerController::HandleBlueprintClicked(EBlueprintKind Kind)
 {
 	// Click toggles: re-clicking the armed blueprint disarms it.
 	SelectedBlueprint = (SelectedBlueprint == Kind) ? EBlueprintKind::None : Kind;
+	ManualYawDegrees = 0.f;   // fresh ghost orientation on every (dis)arm
 	if (BlueprintBar.IsValid())
 	{
 		BlueprintBar->SetSelected(SelectedBlueprint);
@@ -349,6 +425,36 @@ void ARealmPlayerController::OnRoadCurveDec()
 	}
 }
 
+namespace
+{
+	float NormalizeYaw(float Yaw)
+	{
+		Yaw = FMath::Fmod(Yaw, 360.f);
+		return Yaw < 0.f ? Yaw + 360.f : Yaw;
+	}
+}
+
+// Wheel notch while a building blueprint is armed. In UE's Z-up frame positive
+// yaw rotates clockwise viewed from above, so wheel-down adds and wheel-up
+// subtracts. (Camera zoom is suppressed while armed — see ARTSCameraPawn::OnZoom.)
+void ARealmPlayerController::OnBuildRotateCW()
+{
+	if (!IsBuildingGhostArmed())
+	{
+		return;
+	}
+	ManualYawDegrees = NormalizeYaw(ManualYawDegrees + URoadSettings::Get()->RotationStepDegrees);
+}
+
+void ARealmPlayerController::OnBuildRotateCCW()
+{
+	if (!IsBuildingGhostArmed())
+	{
+		return;
+	}
+	ManualYawDegrees = NormalizeYaw(ManualYawDegrees - URoadSettings::Get()->RotationStepDegrees);
+}
+
 void ARealmPlayerController::OnPlaceBuilding()
 {
 	// Road mode: clicks append road points instead of placing a building.
@@ -367,10 +473,14 @@ void ARealmPlayerController::OnPlaceBuilding()
 		return;   // no blueprint armed: clicks on the ground do nothing
 	}
 
+	// Resolve the same snapped position/yaw the ghost shows, and the same dual
+	// verdict — a red ghost must not place.
 	FVector Loc;
-	if (!TraceCursorToGround(Loc))
+	float   Yaw;
+	bool    bValid;
+	if (!ComputeBuildingPlacement(Def->BuildingType, Loc, Yaw, bValid) || !bValid)
 	{
-		return;
+		return;   // off-ground or invalid spot (ghost was red); keep armed
 	}
 
 	UGameInstance* GI = GetGameInstance();
@@ -381,10 +491,10 @@ void ARealmPlayerController::OnPlaceBuilding()
 	}
 
 	FSimWorld& Sim = Sub->GetSim();
-	const FBuildingId Id = Sim.PlaceBuilding(Def->BuildingType, Loc);
+	const FBuildingId Id = Sim.PlaceBuilding(Def->BuildingType, Loc, FVector::ZeroVector, Yaw);
 	if (Id == INVALID_ID)
 	{
-		return;   // invalid spot (ghost was red); keep the blueprint armed
+		return;   // sim refused (race with the ghost verdict); keep the blueprint armed
 	}
 
 	switch (Def->BuildingType)

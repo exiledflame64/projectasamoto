@@ -24,6 +24,10 @@ class REALM_API ARealmPlayerController : public APlayerController
 public:
 	ARealmPlayerController();
 
+	// True while a *building* blueprint (not None, not Road) is armed. The camera
+	// pawn queries this to suppress wheel zoom (the wheel rotates the ghost then).
+	bool IsBuildingGhostArmed() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -42,12 +46,20 @@ private:
 	void OnRoadCommit();
 	void OnRoadCurveInc();
 	void OnRoadCurveDec();
+	void OnBuildRotateCW();   // wheel down: rotate the ghost clockwise (from above)
+	void OnBuildRotateCCW();  // wheel up: rotate counterclockwise
 	void HandleBlueprintClicked(EBlueprintKind Kind);
 	void HandleAssignWorker(int32 BuildingIndex);
 	void HandleUnassignWorker(int32 BuildingIndex);
 	void HandleUpgradeHouse(int32 BuildingIndex, ETier Target);
 	void HandleDowngradeHouse(int32 BuildingIndex);
 	bool TraceCursorToGround(FVector& OutLoc) const;
+
+	// Resolves the armed building's ghost: cursor → ground, optional road snap
+	// (unless Alt/disabled), and the dual validity verdict (sim spacing + no road
+	// overlap). Shared by the Tick ghost render and the LMB commit so they agree.
+	bool ComputeBuildingPlacement(EBuildingType Type, FVector& OutPos,
+		float& OutYaw, bool& bOutValid) const;
 
 	// Road drawing state machine (Roads/RoadBuildTool.h); armed while the
 	// "Road" blueprint is selected.
@@ -60,4 +72,8 @@ private:
 	TSharedPtr<SIntroPanel> IntroPanel;   // TEMP intro window
 
 	EBlueprintKind SelectedBlueprint = EBlueprintKind::None;
+
+	// Manual ghost yaw (mouse wheel), reset whenever a blueprint is (dis)armed.
+	// Snapping to a road overrides this; hold Alt for full manual control.
+	float ManualYawDegrees = 0.f;
 };

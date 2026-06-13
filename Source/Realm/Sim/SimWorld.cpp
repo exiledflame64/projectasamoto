@@ -49,6 +49,25 @@ namespace
 	float StarvingMult(const FAgent& A) { return A.StarveTimer > 0.f ? StarvingSpeedFactor : 1.f; }
 }
 
+// Placeholder footprints derived from the current debug-ghost box extents
+// (±120 cm). The longer side runs along local Y so the building presents its
+// long wall to a road when snapped. TODO(user): tune to the real mesh bounds —
+// the current building meshes are placeholders.
+FVector2D BuildingFootprintHalfSize(EBuildingType Type)
+{
+	switch (Type)
+	{
+	case EBuildingType::House:      return FVector2D(110.f, 140.f);
+	case EBuildingType::Warehouse:  return FVector2D(140.f, 180.f);
+	case EBuildingType::Lumberyard: return FVector2D(120.f, 150.f);
+	case EBuildingType::Sawmill:    return FVector2D(130.f, 160.f);
+	case EBuildingType::Farm:       return FVector2D(120.f, 130.f);   // field plot is separate
+	case EBuildingType::Temple:     return FVector2D(130.f, 150.f);
+	case EBuildingType::Dojo:       return FVector2D(130.f, 150.f);
+	default:                        return FVector2D(120.f, 120.f);
+	}
+}
+
 // Tier ladder edges (a TREE: one incoming edge per tier — downgrade relies on
 // it). Costs/requirements are PLACEHOLDER tuning pending Anton's numbers
 // (population_todos.md §11); the structure is final.
@@ -794,7 +813,7 @@ bool FSimWorld::CanPlaceBuilding(EBuildingType Type, const FVector& Pos) const
 }
 
 FBuildingId FSimWorld::PlaceBuilding(EBuildingType Type, const FVector& Pos,
-	const FVector& VisualScale)
+	const FVector& VisualScale, float YawDegrees)
 {
 	if (!CanPlaceBuilding(Type, Pos))
 	{
@@ -834,6 +853,7 @@ FBuildingId FSimWorld::PlaceBuilding(EBuildingType Type, const FVector& Pos,
 	B.Type        = Type;
 	B.Position    = Pos;
 	B.VisualScale = VisualScale;
+	B.YawDegrees  = YawDegrees;
 	return Buildings.Add(B);
 }
 
@@ -982,6 +1002,7 @@ void FSimWorld::BuildSnapshot(FSimSnapshot& Out) const
 		Snap.AssignedWorkers = B.AssignedWorkers;
 		Snap.MaxWorkers      = MaxWorkersFor(B.Type);
 		Snap.VisualScale     = B.VisualScale;
+		Snap.YawDegrees      = B.YawDegrees;
 		Snap.AllowedTiers    = AllowedTiersFor(B.Type);
 		Snap.ResidentTier    = B.ResidentTier;
 		if (B.Type == EBuildingType::House)
@@ -1055,18 +1076,35 @@ namespace
 		bool          bInputClaimed   = false;
 		bool          bOutputClaimed  = false;
 	};
+
+	// v6 building layout, frozen for legacy load (v7 appended FBuilding::YawDegrees).
+	// FAgent and FTree were unchanged between v6 and v7, so only buildings need a
+	// frozen struct. Field order must match the v6 FBuilding exactly.
+	struct FBuildingV6
+	{
+		EBuildingType Type     = EBuildingType::None;
+		FVector       Position = FVector::ZeroVector;
+		ETier         ResidentTier = ETier::Peasant;
+		FVector       VisualScale = FVector::ZeroVector;
+		int32         Stored[NumResources] = {};
+		float         WorkTimer       = 0.f;
+		int32         AssignedWorkers = 0;
+		bool          bInputClaimed   = false;
+		bool          bOutputClaimed  = false;
+	};
 }
 
 void FSimWorld::Serialize(FArchive& Ar)
 {
+	// v7: building yaw (FBuilding::YawDegrees).
 	// v6: tiers (FAgent::HomeBuilding, FBuilding::ResidentTier).
 	// v5: per-instance visual scale (FTree/FBuilding layout changed).
-	int32 Version = 6;
+	int32 Version = 7;
 	Ar << Version;
-	if (Ar.IsLoading() && Version != 6 && Version != 5)
+	if (Ar.IsLoading() && Version != 7 && Version != 6 && Version != 5)
 	{
 		UE_LOG(LogTemp, Warning,
-			TEXT("[RealmSave] Sim save version %d unsupported (want 5-6); load skipped."), Version);
+			TEXT("[RealmSave] Sim save version %d unsupported (want 5-7); load skipped."), Version);
 		return;
 	}
 
@@ -1134,6 +1172,32 @@ void FSimWorld::Serialize(FArchive& Ar)
 			FMemory::Memcpy(B.Stored, O.Stored, sizeof(B.Stored));
 			B.WorkTimer = O.WorkTimer;   B.AssignedWorkers = O.AssignedWorkers;
 			B.bInputClaimed = O.bInputClaimed;   B.bOutputClaimed = O.bOutputClaimed;
+			Buildings.Add(B);
+		}
+		return;
+	}
+
+	if (Ar.IsLoading() && Version == 6)
+	{
+		// Pre-yaw save: agents/trees match the current layout, only buildings
+		// grew the YawDegrees field. Read the frozen v6 building block, default
+		// yaw to 0 (everything axis-aligned, exactly as it was authored).
+		SerializeArray(Agents);
+		TArray<FBuildingV6> OldBuildings;
+		SerializeArray(OldBuildings);
+		SerializeArray(Trees);
+
+		Buildings.Reset(OldBuildings.Num());
+		for (const FBuildingV6& O : OldBuildings)
+		{
+			FBuilding B;
+			B.Type = O.Type;   B.Position = O.Position;
+			B.ResidentTier = O.ResidentTier;
+			B.VisualScale = O.VisualScale;
+			FMemory::Memcpy(B.Stored, O.Stored, sizeof(B.Stored));
+			B.WorkTimer = O.WorkTimer;   B.AssignedWorkers = O.AssignedWorkers;
+			B.bInputClaimed = O.bInputClaimed;   B.bOutputClaimed = O.bOutputClaimed;
+			B.YawDegrees = 0.f;
 			Buildings.Add(B);
 		}
 		return;

@@ -2,7 +2,10 @@
 
 #include "Roads/RoadNetworkSubsystem.h"
 #include "Roads/RoadSettings.h"
+#include "Roads/RoadSnapMath.h"
 #include "Roads/TerrainHeight.h"
+#include "Core/SimSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
@@ -35,6 +38,54 @@ static FAutoConsoleCommandWithWorld GRealmDebugRoadCmd(
 		World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([]
 		{
 			FScreenshotRequest::RequestScreenshot(TEXT("RoadDebug"), false, false);
+		}), 5.f, false);
+	}));
+
+// Dev verification for the snapping mechanic: lays a straight road, then snaps a
+// house flush against its south edge (via the same query + math the controller
+// uses) and screenshots after 5 s — flush alignment is visible without clicking.
+static FAutoConsoleCommandWithWorld GRealmDebugSnapCmd(
+	TEXT("realm.DebugSnap"),
+	TEXT("Commit a straight road, snap a building beside it, and screenshot the result."),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		URoadNetworkSubsystem* Roads = World ? World->GetSubsystem<URoadNetworkSubsystem>() : nullptr;
+		UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+		USimSubsystem* SimSub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+		if (!Roads || !SimSub)
+		{
+			return;
+		}
+
+		// Straight road running along +X at Y = 1500.
+		TArray<FRoadCommitPoint> Points;
+		Points.Add({ FVector(-2000, 1500, 0), 0.f });
+		Points.Add({ FVector( 2000, 1500, 0), 0.f });
+		Roads->CommitPolyline(Points, URoadSettings::Get()->DefaultWidth, ERoadTier::DirtPath);
+
+		// Cursor just south of the road → snap a house flush to the south edge.
+		const FVector Cursor(0.f, 1100.f, 0.f);
+		FRoadClosestPoint Hit;
+		if (Roads->FindClosestRoadPoint(Cursor, 600.f, Hit))
+		{
+			const URoadSettings* S = URoadSettings::Get();
+			const FVector2D Foot = BuildingFootprintHalfSize(EBuildingType::House);
+			const RoadSnap::FBuildingSnap Snap = RoadSnap::ComputeBuildingSnap(
+				Hit.Point, Hit.Tangent, Cursor, Foot.X, S->DefaultWidth * 0.5f, S->SnapGapCm);
+			FVector Pos = Snap.Position;
+			Pos.Z = 0.f;
+			const FBuildingId Id = SimSub->GetSim().PlaceBuilding(EBuildingType::House,
+				Pos, FVector::ZeroVector, Snap.YawDegrees);
+			UE_LOG(LogTemp, Log,
+				TEXT("[Realm] realm.DebugSnap house id=%d at %s yaw=%.1f (road overlap=%d)"),
+				Id, *Pos.ToString(), Snap.YawDegrees,
+				Roads->DoesAnyRoadOverlapFootprint(Pos, Foot, Snap.YawDegrees) ? 1 : 0);
+		}
+
+		FTimerHandle Handle;
+		World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([]
+		{
+			FScreenshotRequest::RequestScreenshot(TEXT("SnapDebug"), false, false);
 		}), 5.f, false);
 	}));
 #endif // !UE_BUILD_SHIPPING
@@ -153,6 +204,20 @@ TArray<FVector> URoadNetworkSubsystem::GetEdgePolyline(const FGuid& EdgeId) cons
 {
 	return Graph.SampleEdgePolyline(EdgeId,
 		URoadSettings::Get()->SampleSpacing, MakeHeightFn());
+}
+
+bool URoadNetworkSubsystem::FindClosestRoadPoint(const FVector& P, float MaxDist,
+	FRoadClosestPoint& Out) const
+{
+	Out = Graph.FindClosestPointOnNetwork(P, MaxDist);
+	return Out.bValid;
+}
+
+bool URoadNetworkSubsystem::DoesAnyRoadOverlapFootprint(const FVector& Center,
+	const FVector2D& HalfSize, float YawDegrees) const
+{
+	const float RoadHalfWidth = URoadSettings::Get()->DefaultWidth * 0.5f;
+	return Graph.DoesCorridorOverlapOBB(Center, HalfSize, YawDegrees, RoadHalfWidth);
 }
 
 void URoadNetworkSubsystem::SerializeToBytes(TArray<uint8>& OutBytes)

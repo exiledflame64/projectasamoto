@@ -41,6 +41,13 @@ struct FRealmMeshDef
 	UPROPERTY(EditAnywhere, Category = "Visual")
 	FLinearColor Tint = FLinearColor::White;
 
+	// Yaw correction (degrees) added to the sim placement yaw so a mesh whose
+	// "front" isn't authored along the snap convention still faces the road
+	// correctly. Meaningful for buildings; 0 for placeholder meshes. The
+	// visualizer and seed previews both apply (SimYaw + this).
+	UPROPERTY(EditAnywhere, Category = "Visual")
+	float FrontYawOffsetDegrees = 0.f;
+
 	// Z offset that puts the scaled mesh's lowest point on the ground plane —
 	// correct for both centred engine shapes and base-pivot art assets.
 	float GroundLift() const;

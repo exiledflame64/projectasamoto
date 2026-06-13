@@ -86,6 +86,12 @@ void ABuildingSeed::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	// Same root-component caveat as AResourceSeed: appearance only, no transform.
+	// The actor's own editor rotation already previews the sim placement yaw
+	// (mesh is the ROOT, so its world yaw == the actor's). The mesh
+	// FrontYawOffsetDegrees would need a child component to preview separately;
+	// it defaults to 0 for the placeholder meshes, so the actor transform alone
+	// keeps editor preview == runtime. Never rotate the root here (it would
+	// clobber the editor-authored actor rotation — the transform-caution bug).
 	const FRealmMeshDef& Def = UBuildingVisualSet::Resolve()->BuildingDef(Type);
 	Def.ApplyTo(Mesh, this, /*bApplyScale=*/false);
 	if (!bScaleInitialized)
@@ -105,7 +111,10 @@ void ABuildingSeed::BeginPlay()
 		Loc.Z = 0.f;
 
 		FSimWorld& Sim = Sub->GetSim();
-		const FBuildingId Id = Sim.PlaceBuilding(Type, Loc, GetActorScale3D());
+		// The seed's editor yaw is the placement yaw; the runtime proxy adds the
+		// mesh front-offset on top (so editor preview == runtime when offset 0).
+		const FBuildingId Id = Sim.PlaceBuilding(Type, Loc, GetActorScale3D(),
+			GetActorRotation().Yaw);
 		if (Id == INVALID_ID)
 		{
 			UE_LOG(LogTemp, Warning,

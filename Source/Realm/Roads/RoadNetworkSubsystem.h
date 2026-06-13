@@ -39,6 +39,16 @@ public:
 		return Graph.IsConnected(NodeA, NodeB);
 	}
 
+	// --- Snapping queries (road_snapping_todos.md §4.3) ---
+
+	// Closest road point to P within MaxDist (XY); drives the building→road snap.
+	bool FindClosestRoadPoint(const FVector& P, float MaxDist, FRoadClosestPoint& Out) const;
+
+	// True if any road corridor overlaps the building footprint OBB. Uses the
+	// settings road half-width; strict '<' so a flush snapped gap stays valid.
+	bool DoesAnyRoadOverlapFootprint(const FVector& Center, const FVector2D& HalfSize,
+		float YawDegrees) const;
+
 	// Arc-length resampled, terrain-snapped polyline for an edge (renderer +
 	// future movement-cost rasterization share this).
 	TArray<FVector> GetEdgePolyline(const FGuid& EdgeId) const;

@@ -5,9 +5,12 @@
 #include "Roads/RoadNetworkSubsystem.h"
 #include "Roads/RoadRendererSubsystem.h"
 #include "Roads/RoadSettings.h"
+#include "Roads/RoadSnapMath.h"
 #include "Roads/TerrainHeight.h"
+#include "Core/SimSubsystem.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 
@@ -129,7 +132,105 @@ bool URoadBuildToolComponent::ResolveCursorPoint(FVector& OutPoint) const
 		}
 	}
 
+	// Building wall snap (lowest precedence — road node/edge snapping above
+	// already returned; Shift alignment, if any, has been applied to Point).
+	// When the point lands within the trigger radius of a building wall, slide it
+	// onto a line parallel to that wall at the gap offset. Alt or the master
+	// switch disables it.
+	const bool bAlt = PC->IsInputKeyDown(EKeys::LeftAlt) || PC->IsInputKeyDown(EKeys::RightAlt);
+	if (!bAlt && S->bPlacementSnappingEnabled)
+	{
+		TArray<FBuildingFootprint> Foots;
+		GatherBuildingFootprints(Foots);
+
+		const float RoadHalfWidth = S->DefaultWidth * 0.5f;
+		// Activation is measured so the road EDGE (half-width toward the building
+		// from the cursor) need only come within SnapTriggerRadiusCm of a wall —
+		// symmetric with the building→road trigger, and generous enough to grab
+		// from open ground rather than requiring the cursor right on the wall.
+		const float WallTrigger = S->SnapTriggerRadiusCm + RoadHalfWidth;
+		RoadSnap::FWallSnap BestSnap;
+		float BestDistSq = TNumericLimits<float>::Max();
+		for (const FBuildingFootprint& F : Foots)
+		{
+			const FVector Center(F.Center.X, F.Center.Y, Point.Z);
+			const RoadSnap::FWallSnap Snap = RoadSnap::ComputeWallSnap(
+				Center, F.HalfSize, F.Yaw, Point, RoadHalfWidth, S->SnapGapCm,
+				WallTrigger);
+			if (Snap.bValid)
+			{
+				const float DistSq = FVector::DistSquared2D(Snap.Point, Point);
+				if (DistSq < BestDistSq)
+				{
+					BestDistSq = DistSq;
+					BestSnap = Snap;
+				}
+			}
+		}
+		if (BestSnap.bValid)
+		{
+			Point = BestSnap.Point;
+			float Z;
+			if (Network->MakeHeightFn()(FVector2D(Point.X, Point.Y), Z))
+			{
+				Point.Z = Z;
+			}
+		}
+	}
+
 	OutPoint = Point;
+	return true;
+}
+
+void URoadBuildToolComponent::GatherBuildingFootprints(TArray<FBuildingFootprint>& Out) const
+{
+	Out.Reset();
+	const UWorld* World = GetWorld();
+	const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+	const USimSubsystem* Sub = GI ? GI->GetSubsystem<USimSubsystem>() : nullptr;
+	if (!Sub)
+	{
+		return;
+	}
+	const FSimSnapshot& Snap = Sub->GetSnapshot();
+	Out.Reserve(Snap.Buildings.Num());
+	for (const FBuildingSnapshot& B : Snap.Buildings)
+	{
+		FBuildingFootprint F;
+		F.Center   = FVector2D(B.Position.X, B.Position.Y);
+		F.HalfSize = BuildingFootprintHalfSize(B.Type);
+		F.Yaw      = B.YawDegrees;
+		Out.Add(F);
+	}
+}
+
+bool URoadBuildToolComponent::SegmentClearOfBuildings(const TArray<FVector>& Polyline) const
+{
+	if (Polyline.Num() < 2)
+	{
+		return true;
+	}
+	TArray<FBuildingFootprint> Foots;
+	GatherBuildingFootprints(Foots);
+	if (Foots.IsEmpty())
+	{
+		return true;
+	}
+
+	const float RoadHalfWidth = URoadSettings::Get()->DefaultWidth * 0.5f;
+	const float WidthSq = RoadHalfWidth * RoadHalfWidth;
+	for (int32 i = 0; i + 1 < Polyline.Num(); ++i)
+	{
+		const FVector2D A(Polyline[i].X, Polyline[i].Y);
+		const FVector2D B(Polyline[i + 1].X, Polyline[i + 1].Y);
+		for (const FBuildingFootprint& F : Foots)
+		{
+			if (RoadSnap::SegmentToOBBDistanceSq(A, B, F.Center, F.HalfSize, F.Yaw) < WidthSq)
+			{
+				return false;
+			}
+		}
+	}
 	return true;
 }
 
@@ -220,7 +321,8 @@ void URoadBuildToolComponent::RefreshPreview()
 
 		FRoadPreviewSegment Segment;
 		Segment.Polyline = BuildSegmentPolyline(Chain, i, Curvature);
-		Segment.bValid = ValidateSegment(Segment.Polyline);
+		Segment.bValid = ValidateSegment(Segment.Polyline)
+			&& SegmentClearOfBuildings(Segment.Polyline);
 		if (bPending)
 		{
 			bPendingSegmentValid = Segment.bValid;
@@ -294,12 +396,15 @@ void URoadBuildToolComponent::HandleCommit()
 	}
 	for (int32 i = 1; i < Chain.Num(); ++i)
 	{
-		if (!ValidateSegment(BuildSegmentPolyline(Chain, i, Points[i].Curvature)))
+		// Backstop: re-resample (curvature may have changed via Ctrl+wheel after
+		// points were placed) and re-check both slope/length and building overlap.
+		const TArray<FVector> Poly = BuildSegmentPolyline(Chain, i, Points[i].Curvature);
+		if (!ValidateSegment(Poly) || !SegmentClearOfBuildings(Poly))
 		{
 			if (GEngine)
 			{
 				GEngine->AddOnScreenDebugMessage(0x0AD5, 2.f, FColor::Red,
-					TEXT("Cannot commit: a road segment is invalid."));
+					TEXT("Cannot commit: a road segment is invalid or crosses a building."));
 			}
 			return;
 		}

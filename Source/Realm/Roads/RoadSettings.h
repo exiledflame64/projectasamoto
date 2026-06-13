@@ -45,6 +45,25 @@ public:
 	UPROPERTY(EditAnywhere, config, Category = "Placement", meta = (ClampMin = "0.01"))
 	float CurvatureStep = 0.1f;
 
+	// --- Snapping & Placement (road_snapping_todos.md §7) ---
+
+	// Master switch for both snap directions (building→road and road→building).
+	UPROPERTY(EditAnywhere, config, Category = "Snapping & Placement")
+	bool bPlacementSnappingEnabled = true;
+
+	// Activation distance: cursor↔road for the building snap, point↔wall for the
+	// road snap.
+	UPROPERTY(EditAnywhere, config, Category = "Snapping & Placement", meta = (ClampMin = "0"))
+	float SnapTriggerRadiusCm = 150.f;
+
+	// Final clearance left between a building wall and the road edge when snapped.
+	UPROPERTY(EditAnywhere, config, Category = "Snapping & Placement", meta = (ClampMin = "0"))
+	float SnapGapCm = 10.f;
+
+	// Manual building rotation per mouse-wheel notch.
+	UPROPERTY(EditAnywhere, config, Category = "Snapping & Placement", meta = (ClampMin = "1"))
+	float RotationStepDegrees = 15.f;
+
 	// --- Sampling / geometry ---
 
 	// Arc-length resample spacing for edge polylines (spec: 0.5-1.0 m).

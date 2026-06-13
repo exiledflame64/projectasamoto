@@ -69,6 +69,20 @@ private:
 	// Slope / length / reversal validation on the resampled polyline.
 	bool ValidateSegment(const TArray<FVector>& Polyline) const;
 
+	// One building's footprint OBB, pulled from the latest sim snapshot (never
+	// FSimWorld directly — hard rule #2).
+	struct FBuildingFootprint
+	{
+		FVector2D Center   = FVector2D::ZeroVector;
+		FVector2D HalfSize = FVector2D::ZeroVector;
+		float     Yaw      = 0.f;
+	};
+	void GatherBuildingFootprints(TArray<FBuildingFootprint>& Out) const;
+
+	// True if no building footprint corridor-overlaps the resampled polyline
+	// (strict, so a wall-snapped road at the 10 cm gap stays clear).
+	bool SegmentClearOfBuildings(const TArray<FVector>& Polyline) const;
+
 	void RefreshPreview();
 	void ClearAll();
 

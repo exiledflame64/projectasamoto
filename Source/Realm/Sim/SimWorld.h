@@ -22,7 +22,7 @@ public:
 	// set default); editor-scaled seeds feed it.
 	bool        CanPlaceBuilding(EBuildingType Type, const FVector& Pos) const;
 	FBuildingId PlaceBuilding(EBuildingType Type, const FVector& Pos,
-		const FVector& VisualScale = FVector::ZeroVector);
+		const FVector& VisualScale = FVector::ZeroVector, float YawDegrees = 0.f);
 	FAgentId    SpawnAgent(const FVector& Pos, FBuildingId Home = INVALID_ID);
 	FTreeId     SpawnTree(const FVector& Pos,
 		const FVector& VisualScale = FVector::ZeroVector);

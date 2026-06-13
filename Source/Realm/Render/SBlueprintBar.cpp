@@ -78,8 +78,16 @@ void SBlueprintBar::Construct(const FArguments& InArgs)
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 11))
 			.ColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.85f))
 			.ShadowOffset(FVector2D(1.f, 1.f))
-			.Text(NSLOCTEXT("Realm", "PlaceHint",
-				"Left-click the ground to place — click the blueprint again to cancel"))
+			.Text(TAttribute<FText>::CreateLambda([this]
+			{
+				if (Selected == EBlueprintKind::Road)
+				{
+					return NSLOCTEXT("Realm", "RoadHint",
+						"Left-click to add points · RMB undo · Enter commits · Ctrl+Scroll: curve");
+				}
+				return NSLOCTEXT("Realm", "PlaceHint",
+					"Left-click to place · Scroll: rotate · Alt: disable snapping · RMB cancels");
+			}))
 		]
 
 		+ SVerticalBox::Slot()

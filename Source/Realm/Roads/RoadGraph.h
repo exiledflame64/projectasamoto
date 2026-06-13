@@ -14,6 +14,17 @@
 #include "CoreMinimal.h"
 #include "Roads/RoadTypes.h"
 
+// Result of FindClosestPointOnNetwork: the closest point on any edge polyline
+// to a query point, with the segment tangent there (road_snapping_todos.md §4.1).
+struct FRoadClosestPoint
+{
+	FGuid   EdgeId;
+	FVector Point   = FVector::ZeroVector;   // closest point on the resampled polyline
+	FVector Tangent = FVector::ZeroVector;   // normalized segment direction at that point
+	float   Distance = 0.f;                  // 2D (XY) distance from the query point
+	bool    bValid  = false;
+};
+
 class REALM_API FRoadGraph
 {
 public:
@@ -43,6 +54,17 @@ public:
 
 	// Distance to the nearest edge polyline <= width/2 + Tolerance.
 	bool IsPointOnRoad(const FVector& Position, float Tolerance = 0.f) const;
+
+	// Closest point on any edge to QueryPoint within MaxDistance (XY), with the
+	// winning segment's chord tangent. Used by the building→road snap.
+	FRoadClosestPoint FindClosestPointOnNetwork(const FVector& QueryPoint,
+		float MaxDistance) const;
+
+	// True if any road corridor (edge polyline swept by RoadHalfWidth) intersects
+	// the oriented box (Center, HalfSize XY, YawDegrees). Strict: distance <
+	// RoadHalfWidth, no margin, so a flush snapped building at the gap stays valid.
+	bool DoesCorridorOverlapOBB(const FVector& Center, const FVector2D& HalfSize,
+		float YawDegrees, float RoadHalfWidth) const;
 
 	// BFS over the graph (future building connection checks).
 	bool IsConnected(const FGuid& NodeA, const FGuid& NodeB) const;

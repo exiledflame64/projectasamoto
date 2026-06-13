@@ -14,6 +14,7 @@
 #include "Core/SimSubsystem.h"
 #include "Save/RealmSaveGame.h"
 #include "Roads/RoadNetworkSubsystem.h"
+#include "RealmPlayerController.h"
 
 const FString ARTSCameraPawn::SaveSlotName = TEXT("RealmPhase0");
 
@@ -125,6 +126,15 @@ void ARTSCameraPawn::OnZoom(float Value)
 	if (PC && (PC->IsInputKeyDown(EKeys::LeftControl) || PC->IsInputKeyDown(EKeys::RightControl)))
 	{
 		return;
+	}
+	// While a building blueprint is armed the wheel rotates the ghost instead of
+	// zooming (same stand-down pattern as the road tool's Ctrl+wheel).
+	if (const ARealmPlayerController* RealmPC = Cast<ARealmPlayerController>(PC))
+	{
+		if (RealmPC->IsBuildingGhostArmed())
+		{
+			return;
+		}
 	}
 	PendingZoom = Value;
 }

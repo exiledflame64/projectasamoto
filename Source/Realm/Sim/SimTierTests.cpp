@@ -162,4 +162,43 @@ bool FTierSaveRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// --- Building placement yaw (road_snapping_todos.md §3, §9.5) ---
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBuildingYawSaveTest,
+	"Realm.Sim.BuildingYawSave",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FBuildingYawSaveTest::RunTest(const FString& Parameters)
+{
+	FSimWorld Sim;
+	const FBuildingId Yawed = Sim.PlaceBuilding(EBuildingType::House,
+		FVector(0, 0, 0), FVector::ZeroVector, /*Yaw=*/47.5f);
+	Sim.PlaceBuilding(EBuildingType::Lumberyard, FVector(1000, 0, 0));   // default yaw 0
+
+	// Snapshot carries the yaw.
+	FSimSnapshot Snap;
+	Sim.BuildSnapshot(Snap);
+	TestTrue(TEXT("yaw in snapshot"),
+		FMath::IsNearlyEqual(Snap.Buildings[Yawed].YawDegrees, 47.5f, 0.01f));
+	TestTrue(TEXT("default yaw zero"),
+		FMath::IsNearlyEqual(Snap.Buildings[1].YawDegrees, 0.f, 0.01f));
+
+	// Round-trips through serialize/load.
+	TArray<uint8> Bytes;
+	FMemoryWriter Writer(Bytes);
+	Sim.Serialize(Writer);
+
+	FSimWorld Loaded;
+	FMemoryReader Reader(Bytes);
+	Loaded.Serialize(Reader);
+
+	FSimSnapshot After;
+	Loaded.BuildSnapshot(After);
+	TestTrue(TEXT("yaw survives save/load"),
+		FMath::IsNearlyEqual(After.Buildings[Yawed].YawDegrees, 47.5f, 0.01f));
+
+	// Footprint table: longer side runs along local Y (parallel to the road).
+	const FVector2D Foot = BuildingFootprintHalfSize(EBuildingType::House);
+	TestTrue(TEXT("footprint longer along Y"), Foot.Y >= Foot.X);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

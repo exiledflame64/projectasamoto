@@ -1,6 +1,7 @@
 // Copyright Asamoto.
 
 #include "Roads/RoadGraph.h"
+#include "Roads/RoadSnapMath.h"
 
 namespace
 {
@@ -188,6 +189,73 @@ bool FRoadGraph::IsPointOnRoad(const FVector& Position, float Tolerance) const
 	const float Dist = FVector2D::Distance(
 		FVector2D(Nearest.X, Nearest.Y), FVector2D(Position.X, Position.Y));
 	return Edge && Dist <= Edge->Width * 0.5f + Tolerance;
+}
+
+FRoadClosestPoint FRoadGraph::FindClosestPointOnNetwork(const FVector& QueryPoint,
+	float MaxDistance) const
+{
+	const FVector2D Q(QueryPoint.X, QueryPoint.Y);
+	FRoadClosestPoint Best;
+	float BestDistSq = MaxDistance * MaxDistance;
+
+	for (const auto& Pair : Edges)
+	{
+		FVector P0, P1, P2, P3;
+		GetControlPoints(Pair.Value, P0, P1, P2, P3);
+
+		TArray<FVector> Points;
+		TArray<float> Params;
+		DenseSample(P0, P1, P2, P3, Pair.Value.Curvature, /*MaxSpacing=*/50.f, Points, Params);
+
+		for (int32 i = 0; i + 1 < Points.Num(); ++i)
+		{
+			const FVector2D A(Points[i].X, Points[i].Y);
+			const FVector2D B(Points[i + 1].X, Points[i + 1].Y);
+			const FVector2D AB = B - A;
+			const float LenSq = AB.SizeSquared();
+			const float Frac = (LenSq > KINDA_SMALL_NUMBER)
+				? FMath::Clamp(FVector2D::DotProduct(Q - A, AB) / LenSq, 0.f, 1.f) : 0.f;
+			const float DistSq = (A + AB * Frac - Q).SizeSquared();
+			if (DistSq < BestDistSq)
+			{
+				BestDistSq = DistSq;
+				Best.EdgeId   = Pair.Key;
+				Best.Point    = FMath::Lerp(Points[i], Points[i + 1], Frac);
+				Best.Tangent  = (Points[i + 1] - Points[i]).GetSafeNormal();
+				Best.Distance = FMath::Sqrt(DistSq);
+				Best.bValid   = true;
+			}
+		}
+	}
+	return Best;
+}
+
+bool FRoadGraph::DoesCorridorOverlapOBB(const FVector& Center, const FVector2D& HalfSize,
+	float YawDegrees, float RoadHalfWidth) const
+{
+	const FVector2D BoxCenter(Center.X, Center.Y);
+	const float WidthSq = RoadHalfWidth * RoadHalfWidth;
+
+	for (const auto& Pair : Edges)
+	{
+		FVector P0, P1, P2, P3;
+		GetControlPoints(Pair.Value, P0, P1, P2, P3);
+
+		TArray<FVector> Points;
+		TArray<float> Params;
+		DenseSample(P0, P1, P2, P3, Pair.Value.Curvature, /*MaxSpacing=*/50.f, Points, Params);
+
+		for (int32 i = 0; i + 1 < Points.Num(); ++i)
+		{
+			const FVector2D A(Points[i].X, Points[i].Y);
+			const FVector2D B(Points[i + 1].X, Points[i + 1].Y);
+			if (RoadSnap::SegmentToOBBDistanceSq(A, B, BoxCenter, HalfSize, YawDegrees) < WidthSq)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 bool FRoadGraph::IsConnected(const FGuid& NodeA, const FGuid& NodeB) const

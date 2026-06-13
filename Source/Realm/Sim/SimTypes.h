@@ -118,6 +118,15 @@ REALM_API const TArray<FHouseUpgradeRule>& GetHouseUpgradeRules();
 static constexpr float FarmFieldOffset   = 380.f;   // field centre, +X from the farm
 static constexpr float FarmFieldHalfSize = 220.f;   // square half-extent
 
+// Rectangular footprint half-extents per building type, in LOCAL space:
+//   HalfSize.X = half-depth (front/back), HalfSize.Y = half-width along the road.
+// The local -X face is the wall that sits flush against a road when snapped, so
+// values are authored with the LONGER side along local Y (parallel to the road).
+// This footprint drives road snapping, the rotated placement ghost, and the
+// road-overlap tests. The collision discs in GetOccupiedDiscs stay the
+// building-vs-building placement authority (footprint does not touch that).
+REALM_API FVector2D BuildingFootprintHalfSize(EBuildingType Type);
+
 // --- Sim data: plain structs, trivially copyable, NO UObjects ---
 struct FAgent
 {
@@ -172,6 +181,12 @@ struct FBuilding
 	// dog-piling the same errand (released on pickup/delivery/death).
 	bool bInputClaimed  = false;
 	bool bOutputClaimed = false;
+
+	// Placement yaw in degrees (Z-up; positive = clockwise viewed from above).
+	// The local -X face is the road-facing wall when snapped. Cosmetic to the
+	// sim (it never inspects yaw) but persisted and surfaced to the renderer.
+	// The farm field plot intentionally ignores it (stays axis-aligned).
+	float YawDegrees = 0.f;
 };
 
 // "Tree": minimal resource node — a target position and a yield.
@@ -225,6 +240,7 @@ struct FBuildingSnapshot
 	int32         AssignedWorkers = 0;
 	int32         MaxWorkers      = 0;
 	FVector       VisualScale     = FVector::ZeroVector;   // zero = visual set default
+	float         YawDegrees      = 0.f;                   // placement yaw (Z-up)
 
 	// Tier gate of this workplace (TierBit mask; 0 = takes no workers).
 	uint8 AllowedTiers = 0;
